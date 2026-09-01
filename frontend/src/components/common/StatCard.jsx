@@ -1,6 +1,7 @@
 import React from "react";
+import { Info } from "lucide-react";
 
-export function StatCard({ title, value, change, isPositive = true, icon: Icon, color = "blue", subtitle }) {
+export function StatCard({ title, value, change, isPositive = true, icon: Icon, color = "blue", subtitle, sourceInfo }) {
   const colorMap = {
     blue: {
       bg: "var(--color-primary-light)",
@@ -34,9 +35,24 @@ export function StatCard({ title, value, change, isPositive = true, icon: Icon, 
   return (
     <div className="card" style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-        <span style={{ fontSize: "13px", fontWeight: "500", color: "var(--text-secondary)" }}>
-          {title}
-        </span>
+        <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+          <span style={{ fontSize: "13px", fontWeight: "500", color: "var(--text-secondary)" }}>
+            {title}
+          </span>
+          {sourceInfo && (
+            <span
+              title={sourceInfo}
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                cursor: "help",
+                color: "var(--text-tertiary)",
+              }}
+            >
+              <Info size={12} />
+            </span>
+          )}
+        </div>
         {Icon && (
           <div
             style={{

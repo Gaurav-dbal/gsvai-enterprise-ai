@@ -11,7 +11,7 @@ import {
   Shield,
   Database,
   Sliders,
-  History,
+  History as HistoryIcon,
   Plus,
   Edit,
   Trash2,
@@ -43,6 +43,8 @@ import {
   updateFusionConnection,
   testFusionConnection,
   disableFusionConnection,
+  fetchDatabaseConnections,
+  testDatabaseConnection,
 } from "../../../api/client";
 
 export function SettingsView({ onHealthCheckUpdate, onNavigate }) {
@@ -98,6 +100,11 @@ export function SettingsView({ onHealthCheckUpdate, onNavigate }) {
     default_currency: "USD",
   });
 
+  // --- Database Connections State (Data Assistant / SQL) ---
+  const [databaseConnections, setDatabaseConnections] = useState([]);
+  const [dbConnsLoading, setDbConnsLoading] = useState(false);
+  const [testingDbConnId, setTestingDbConnId] = useState(null);
+
   // --- Audit Logs State ---
   const [auditLogs, setAuditLogs] = useState([]);
   const [auditLoading, setAuditLoading] = useState(false);
@@ -112,6 +119,7 @@ export function SettingsView({ onHealthCheckUpdate, onNavigate }) {
   useEffect(() => {
     if (activeTab === "users") loadUsers();
     if (activeTab === "roles") loadRoles();
+    if (activeTab === "database") loadDatabaseConnections();
     if (activeTab === "fusion") loadFusionConnections();
     if (activeTab === "audit") loadAuditLogs();
   }, [activeTab]);
@@ -323,6 +331,35 @@ export function SettingsView({ onHealthCheckUpdate, onNavigate }) {
     }
   };
 
+  // --- Database Connections Handlers ---
+  const loadDatabaseConnections = async () => {
+    setDbConnsLoading(true);
+    try {
+      const data = await fetchDatabaseConnections();
+      setDatabaseConnections(data || []);
+    } catch (err) {
+      showNotification(err.message, "error");
+    } finally {
+      setDbConnsLoading(false);
+    }
+  };
+
+  const handleTestDatabaseConnection = async (connId) => {
+    setTestingDbConnId(connId);
+    try {
+      const res = await testDatabaseConnection(connId);
+      showNotification(
+        `Database Connection #${connId}: ${res.status} — ${res.message}`,
+        res.status === "CONNECTED" ? "success" : "error"
+      );
+      loadDatabaseConnections();
+    } catch (err) {
+      showNotification(err.message, "error");
+    } finally {
+      setTestingDbConnId(null);
+    }
+  };
+
   // --- Audit Logs Handlers ---
   const loadAuditLogs = async () => {
     setAuditLoading(true);
@@ -429,12 +466,35 @@ export function SettingsView({ onHealthCheckUpdate, onNavigate }) {
           </button>
 
           <button
+            className={`btn ${activeTab === "database" ? "btn-primary" : "btn-secondary"}`}
+            onClick={() => setActiveTab("database")}
+            style={{ fontSize: "12.5px", padding: "6px 14px" }}
+          >
+            <Database size={14} />
+            Database Connections
+            {databaseConnections.length > 0 && (
+              <span
+                style={{
+                  marginLeft: "6px",
+                  padding: "1px 6px",
+                  borderRadius: "10px",
+                  backgroundColor: activeTab === "database" ? "rgba(255,255,255,0.25)" : "var(--bg-surface-subtle)",
+                  fontSize: "11px",
+                  fontWeight: "700",
+                }}
+              >
+                {databaseConnections.length}
+              </span>
+            )}
+          </button>
+
+          <button
             className={`btn ${activeTab === "fusion" ? "btn-primary" : "btn-secondary"}`}
             onClick={() => setActiveTab("fusion")}
             style={{ fontSize: "12.5px", padding: "6px 14px" }}
           >
             <Database size={14} />
-            Oracle Fusion Connections
+            Oracle Fusion ERP (REST)
             {fusionConnections.length > 0 && (
               <span
                 style={{
@@ -465,7 +525,7 @@ export function SettingsView({ onHealthCheckUpdate, onNavigate }) {
             onClick={() => setActiveTab("audit")}
             style={{ fontSize: "12.5px", padding: "6px 14px" }}
           >
-            <History size={14} />
+            <HistoryIcon size={14} />
             Audit & Security Logs
           </button>
         </div>
@@ -799,6 +859,153 @@ export function SettingsView({ onHealthCheckUpdate, onNavigate }) {
               </div>
             </div>
           )}
+        </div>
+      )}
+
+      {/* ============================================================= */}
+      {/* TAB: ORACLE DATABASE CONNECTIONS (DATA ASSISTANT / SQL)        */}
+      {/* ============================================================= */}
+      {activeTab === "database" && (
+        <div className="card" style={{ padding: "20px" }}>
+          <div className="card-header" style={{ marginBottom: "16px", flexWrap: "wrap", gap: "12px" }}>
+            <div>
+              <h3 className="card-title" style={{ fontSize: "16px", fontWeight: "700" }}>Oracle Database Connections</h3>
+              <p className="card-subtitle" style={{ fontSize: "12.5px" }}>
+                Configured relational database schemas available for Data Assistant natural language SQL querying. Tested securely with metadata discovery.
+              </p>
+            </div>
+            <button className="btn btn-secondary" onClick={loadDatabaseConnections} style={{ fontSize: "12.5px" }}>
+              <RefreshCw size={14} /> Refresh Sources
+            </button>
+          </div>
+
+          <div className="table-container">
+            <table className="enterprise-table">
+              <thead>
+                <tr>
+                  <th style={{ width: "50px" }}>ID</th>
+                  <th>Connection Name</th>
+                  <th>Type</th>
+                  <th>Schema / User</th>
+                  <th>Status</th>
+                  <th>Last Tested Result</th>
+                  <th style={{ width: "160px", textAlign: "center" }}>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {dbConnsLoading ? (
+                  <tr>
+                    <td colSpan={7} style={{ textAlign: "center", padding: "24px" }}>
+                      Loading database connections...
+                    </td>
+                  </tr>
+                ) : databaseConnections.length === 0 ? (
+                  <tr>
+                    <td colSpan={7} style={{ textAlign: "center", padding: "30px", color: "var(--text-secondary)" }}>
+                      <AlertCircle size={20} style={{ color: "var(--text-muted)", margin: "0 auto 8px" }} />
+                      No database connections found.
+                    </td>
+                  </tr>
+                ) : (
+                  databaseConnections.map((c) => {
+                    const isTestingThis = testingDbConnId === c.connection_id;
+                    return (
+                      <tr key={c.connection_id}>
+                        <td style={{ fontFamily: "var(--font-mono)", fontWeight: "700", color: "var(--color-primary)" }}>
+                          #{c.connection_id}
+                        </td>
+                        <td>
+                          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                            <strong style={{ color: "var(--text-primary)" }}>{c.connection_name}</strong>
+                            {c.is_default && (
+                              <span
+                                style={{
+                                  fontSize: "10.5px",
+                                  padding: "2px 6px",
+                                  borderRadius: "10px",
+                                  backgroundColor: "rgba(37, 99, 235, 0.1)",
+                                  color: "#2563EB",
+                                  fontWeight: "700",
+                                }}
+                              >
+                                Default Source
+                              </span>
+                            )}
+                          </div>
+                        </td>
+                        <td>
+                          <span
+                            style={{
+                              padding: "2px 8px",
+                              borderRadius: "10px",
+                              backgroundColor: "var(--bg-surface-subtle)",
+                              border: "1px solid var(--border-subtle)",
+                              fontWeight: "700",
+                              fontSize: "11px",
+                            }}
+                          >
+                            {c.database_type || "ORACLE"}
+                          </span>
+                        </td>
+                        <td style={{ fontFamily: "var(--font-mono)", fontSize: "12px" }}>
+                          {c.schema_name || c.username || "ADMIN"}
+                        </td>
+                        <td>
+                          {c.status === "CONNECTED" ? (
+                            <span
+                              style={{
+                                fontSize: "11px",
+                                padding: "3px 8px",
+                                borderRadius: "12px",
+                                backgroundColor: "rgba(16, 185, 129, 0.1)",
+                                color: "#047857",
+                                fontWeight: "700",
+                                display: "inline-flex",
+                                alignItems: "center",
+                                gap: "4px",
+                              }}
+                            >
+                              <CheckCircle size={12} /> Connected
+                            </span>
+                          ) : (
+                            <span
+                              style={{
+                                fontSize: "11px",
+                                padding: "3px 8px",
+                                borderRadius: "12px",
+                                backgroundColor: "rgba(239, 68, 68, 0.1)",
+                                color: "#b91c1c",
+                                fontWeight: "700",
+                                display: "inline-flex",
+                                alignItems: "center",
+                                gap: "4px",
+                              }}
+                            >
+                              <XCircle size={12} /> Failed
+                            </span>
+                          )}
+                        </td>
+                        <td style={{ fontSize: "12px", color: "var(--text-secondary)", maxWidth: "260px" }}>
+                          {c.last_test_message || "Active and available for text-to-SQL."}
+                        </td>
+                        <td style={{ textAlign: "center" }}>
+                          <button
+                            className="btn btn-secondary"
+                            onClick={() => handleTestDatabaseConnection(c.connection_id)}
+                            disabled={isTestingThis}
+                            style={{ fontSize: "11.5px", padding: "4px 10px" }}
+                          >
+                            {isTestingThis ? <RefreshCw size={12} className="spin" /> : <RefreshCw size={12} />}
+                            {isTestingThis ? "Testing..." : "Test Connection"}
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
 

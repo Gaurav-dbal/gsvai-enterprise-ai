@@ -43,6 +43,8 @@ from services.invoice_db_service import (
     update_invoice_review,
     approve_invoice,
     reject_invoice,
+    get_invoice_counts,
+    get_invoice_ai_trace,
 )
 from services.oracle_fusion_service import (
     get_fusion_connections,
@@ -69,7 +71,25 @@ from services.auth_rbac_service import (
     get_audit_logs,
     log_audit_event,
 )
+from services.oracle_db_service import (
+    get_database_sources,
+    test_database_connectivity,
+    get_connection,
+)
+from services.data_assistant_service import (
+    discover_schema,
+    process_data_assistant_query,
+)
+from services.dashboard_service import (
+    get_dashboard_overview,
+)
 
+from services.email_service import EmailService
+
+from models.email_models import (
+    EmailCreateRequest,
+    EmailResponse,
+)
 
 # =========================================================
 # FastAPI Application
@@ -781,6 +801,42 @@ def get_invoice_review_queue_api(
         return get_review_queue(status_filter=status)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to fetch review queue: {e}")
+
+
+@app.get("/api/invoices/stats")
+def get_invoice_stats_api(
+    x_user_id: Optional[str] = Header(None, alias="X-User-Id"),
+    x_user_role: Optional[str] = Header(None, alias="X-User-Role"),
+):
+    """
+    Returns real invoice and document aggregate counters from Oracle DB.
+    """
+    try:
+        return get_invoice_counts()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to fetch invoice stats: {e}")
+
+
+@app.get("/api/invoices/{invoice_id}/trace")
+def get_invoice_trace_api(
+    invoice_id: int,
+    x_user_id: Optional[str] = Header(None, alias="X-User-Id"),
+    x_user_role: Optional[str] = Header(None, alias="X-User-Role"),
+):
+    """
+    Returns complete end-to-end AI/ML/OCR processing trace for an invoice.
+    """
+    user = get_current_user_context(x_user_id, x_user_role)
+    require_permission("INVOICE_VIEW")(user)
+    try:
+        trace = get_invoice_ai_trace(invoice_id)
+        if not trace:
+            raise HTTPException(status_code=404, detail=f"Invoice #{invoice_id} trace not found.")
+        return trace
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to fetch invoice AI trace: {e}")
 
 
 @app.get("/api/invoices/{invoice_id}/review")
@@ -1645,3 +1701,225 @@ def get_documents():
             except Exception:
 
                 pass
+
+# =========================================================
+# Email Automation API
+# =========================================================
+
+email_service = EmailService()
+
+
+@app.post(
+    "/api/emails",
+    response_model=EmailResponse,
+    status_code=201,
+)
+def create_email(request: EmailCreateRequest):
+    """
+    Receives and stores an incoming email.
+    """
+    try:
+        return email_service.create_email(request)
+
+    except Exception as e:
+        print()
+        print("=" * 60)
+        print("EMAIL CREATE ERROR")
+        print("=" * 60)
+        print(str(e))
+
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to create email: {e}",
+        )
+
+
+@app.get(
+    "/api/emails/{email_id}",
+    response_model=EmailResponse,
+)
+def get_email(email_id: str):
+    """
+    Retrieves an email by EMAIL_ID.
+    """
+    try:
+        return email_service.get_email(email_id)
+
+    except ValueError as e:
+        raise HTTPException(
+            status_code=404,
+            detail=str(e),
+        )
+
+    except Exception as e:
+        print()
+        print("=" * 60)
+        print("EMAIL RETRIEVAL ERROR")
+        print("=" * 60)
+        print(str(e))
+
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to retrieve email: {str(e)}",
+        )
+@app.post(
+    "/api/emails/{email_id}/analyze"
+)
+def analyze_email_endpoint(email_id: str):
+    """
+    Analyze an email using OCI Generative AI.
+    """
+
+    try:
+        return email_service.analyze_email_by_id(
+            email_id
+        )
+
+    except ValueError as e:
+        raise HTTPException(
+            status_code=404,
+            detail=str(e),
+        )
+
+    except Exception as e:
+        print()
+        print("=" * 60)
+        print("EMAIL ANALYSIS ERROR")
+        print("=" * 60)
+        print(str(e))
+
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to analyze email: {e}",
+        )
+
+
+@app.post(
+    "/api/emails/{email_id}/route"
+)
+def route_email_endpoint(email_id: str):
+    """
+    Analyze an email and route it to the
+    appropriate AI agent.
+    """
+
+    try:
+        return email_service.route_email_by_id(
+            email_id
+        )
+
+    except ValueError as e:
+        raise HTTPException(
+            status_code=404,
+            detail=str(e),
+        )
+
+    except Exception as e:
+        print()
+        print("=" * 60)
+        print("EMAIL ROUTING ERROR")
+        print("=" * 60)
+        print(str(e))
+
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to route email: {e}",
+        )
+# =========================================================
+# Data Assistant & Text-to-SQL Endpoints
+# =========================================================
+
+class DataAssistantQueryRequest(BaseModel):
+    question: str
+    connection_id: Optional[int] = None
+    max_rows: Optional[int] = 100
+
+
+@app.get("/api/data-assistant/sources")
+def get_data_assistant_sources_api():
+    """
+    Returns available real database sources for Data Assistant query execution.
+    """
+    return get_database_sources(active_only=True)
+
+
+@app.get("/api/data-assistant/schema")
+def get_data_assistant_schema_api(connection_id: Optional[int] = None):
+    """
+    Returns discovered tables, columns, and dynamic recommended queries from Oracle Data Dictionary.
+    """
+    return discover_schema(connection_id=connection_id)
+
+
+@app.post("/api/data-assistant/query")
+def execute_data_assistant_query_api(
+    request: DataAssistantQueryRequest,
+    x_user_id: Optional[str] = Header(None, alias="X-User-Id"),
+    x_user_role: Optional[str] = Header(None, alias="X-User-Role"),
+):
+    """
+    Executes a natural language analytical question against the configured Oracle Database schema.
+    Flow: User Question -> Real Schema Context -> OCI GenAI SQL -> SQL Safety Check -> Oracle DB Execution -> Results.
+    """
+    user = get_current_user_context(x_user_id, x_user_role)
+    if not request.question or not request.question.strip():
+        raise HTTPException(status_code=400, detail="Query question cannot be empty.")
+
+    return process_data_assistant_query(
+        question=request.question.strip(),
+        connection_id=request.connection_id,
+        max_rows=request.max_rows or 100,
+        user_id=user.get("username", "user_admin"),
+    )
+
+
+# =========================================================
+# Database Connections Management API (Settings)
+# =========================================================
+
+@app.get("/api/database/connections")
+def list_database_connections_api(
+    active_only: bool = False,
+    x_user_id: Optional[str] = Header(None, alias="X-User-Id"),
+    x_user_role: Optional[str] = Header(None, alias="X-User-Role"),
+):
+    """
+    Admin: Lists all configured Oracle Database connections.
+    """
+    return get_database_sources(active_only=active_only)
+
+
+@app.post("/api/database/connections/{connection_id}/test")
+def test_database_connection_api(
+    connection_id: int,
+    x_user_id: Optional[str] = Header(None, alias="X-User-Id"),
+    x_user_role: Optional[str] = Header(None, alias="X-User-Role"),
+):
+    """
+    Safely tests database connectivity and metadata accessibility without executing user SQL.
+    """
+    user = get_current_user_context(x_user_id, x_user_role)
+    res = test_database_connectivity(connection_id)
+    log_audit_event(
+        action="DATABASE_CONNECTION_TESTED",
+        resource_type="DATABASE_CONNECTION",
+        resource_id=str(connection_id),
+        user_id=user.get("username", "user_admin"),
+        details={"status": res.get("status"), "message": res.get("message")},
+        status=res.get("status"),
+    )
+    return res
+
+
+# =========================================================
+# Dashboard Operational Telemetry API
+# =========================================================
+@app.get("/api/dashboard/stats")
+@app.get("/api/dashboard/overview")
+def get_dashboard_stats_api(period: str = "today"):
+    """
+    Returns live aggregated counts, real AI model throughput, document processing pipelines,
+    workflow health, and verified audit history from Oracle Autonomous Database for the Overview Dashboard.
+    Zero demo data or mock fallbacks.
+    """
+    return get_dashboard_overview(period=period)

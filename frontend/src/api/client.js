@@ -873,3 +873,198 @@ export async function submitInvoiceToFusion(invoiceId, connectionId, force = fal
   return await response.json();
 }
 
+/**
+ * Fetch available database sources for Data Assistant
+ * GET /api/data-assistant/sources
+ */
+export async function fetchDataAssistantSources() {
+  const baseUrl = getApiBaseUrl();
+  const response = await fetch(`${baseUrl}/api/data-assistant/sources`, {
+    method: "GET",
+    headers: { "Content-Type": "application/json" },
+  });
+
+  if (!response.ok) {
+    let errorMsg = `Failed to fetch data sources (${response.status})`;
+    try {
+      const errJson = await response.json();
+      if (errJson && errJson.detail) errorMsg = errJson.detail;
+    } catch {}
+    throw new Error(errorMsg);
+  }
+
+  return await response.json();
+}
+
+/**
+ * Fetch discovered database schema metadata and dynamic prompt suggestions
+ * GET /api/data-assistant/schema
+ */
+export async function fetchDataAssistantSchema(connectionId = null) {
+  const baseUrl = getApiBaseUrl();
+  const url = connectionId
+    ? `${baseUrl}/api/data-assistant/schema?connection_id=${connectionId}`
+    : `${baseUrl}/api/data-assistant/schema`;
+
+  const response = await fetch(url, {
+    method: "GET",
+    headers: { "Content-Type": "application/json" },
+  });
+
+  if (!response.ok) {
+    let errorMsg = `Failed to fetch schema (${response.status})`;
+    try {
+      const errJson = await response.json();
+      if (errJson && errJson.detail) errorMsg = errJson.detail;
+    } catch {}
+    throw new Error(errorMsg);
+  }
+
+  return await response.json();
+}
+
+/**
+ * Execute natural language text-to-SQL query against real database
+ * POST /api/data-assistant/query
+ */
+export async function executeDataAssistantQuery({ question, connection_id = null, max_rows = 100 }) {
+  const baseUrl = getApiBaseUrl();
+  const response = await fetch(`${baseUrl}/api/data-assistant/query`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-User-Id": localStorage.getItem("gsvai_user_id") || "user_admin",
+      "X-User-Role": localStorage.getItem("gsvai_user_role") || "ADMIN",
+    },
+    body: JSON.stringify({ question, connection_id, max_rows }),
+  });
+
+  if (!response.ok) {
+    let errorMsg = `Data Assistant query failed (${response.status})`;
+    try {
+      const errJson = await response.json();
+      if (errJson && errJson.detail) errorMsg = errJson.detail;
+    } catch {}
+    throw new Error(errorMsg);
+  }
+
+  return await response.json();
+}
+
+/**
+ * Fetch all configured database connections for Settings
+ * GET /api/database/connections
+ */
+export async function fetchDatabaseConnections(activeOnly = false) {
+  const baseUrl = getApiBaseUrl();
+  const response = await fetch(`${baseUrl}/api/database/connections?active_only=${activeOnly}`, {
+    method: "GET",
+    headers: { "Content-Type": "application/json" },
+  });
+
+  if (!response.ok) {
+    let errorMsg = `Failed to fetch database connections (${response.status})`;
+    try {
+      const errJson = await response.json();
+      if (errJson && errJson.detail) errorMsg = errJson.detail;
+    } catch {}
+    throw new Error(errorMsg);
+  }
+
+  return await response.json();
+}
+
+/**
+ * Test connectivity for an Oracle Database connection
+ * POST /api/database/connections/{connection_id}/test
+ */
+export async function testDatabaseConnection(connectionId) {
+  const baseUrl = getApiBaseUrl();
+  const response = await fetch(`${baseUrl}/api/database/connections/${connectionId}/test`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+  });
+
+  if (!response.ok) {
+    let errorMsg = `Connection test failed (${response.status})`;
+    try {
+      const errJson = await response.json();
+      if (errJson && errJson.detail) errorMsg = errJson.detail;
+    } catch {}
+    throw new Error(errorMsg);
+  }
+
+  return await response.json();
+}
+
+/**
+ * Fetch live aggregated platform dashboard statistics from Oracle DB
+ * GET /api/dashboard/stats
+ */
+export async function fetchDashboardStats(period = "today") {
+  const baseUrl = getApiBaseUrl();
+  const response = await fetch(`${baseUrl}/api/dashboard/stats?period=${encodeURIComponent(period)}`, {
+    method: "GET",
+    headers: { "Content-Type": "application/json" },
+  });
+
+  if (!response.ok) {
+    let errorMsg = `Failed to fetch dashboard stats (${response.status})`;
+    try {
+      const errJson = await response.json();
+      if (errJson && errJson.detail) errorMsg = errJson.detail;
+    } catch {}
+    throw new Error(errorMsg);
+  }
+
+  return await response.json();
+}
+
+/**
+ * Fetch real aggregate invoice and document counters from Oracle DB
+ * GET /api/invoices/stats
+ */
+export async function fetchInvoiceStats() {
+  const baseUrl = getApiBaseUrl();
+  const response = await fetch(`${baseUrl}/api/invoices/stats`, {
+    method: "GET",
+    headers: { "Content-Type": "application/json" },
+  });
+
+  if (!response.ok) {
+    let errorMsg = `Failed to fetch invoice stats (${response.status})`;
+    try {
+      const errJson = await response.json();
+      if (errJson && errJson.detail) errorMsg = errJson.detail;
+    } catch {}
+    throw new Error(errorMsg);
+  }
+
+  return await response.json();
+}
+
+/**
+ * Fetch comprehensive end-to-end AI/ML/OCR processing trace for an invoice
+ * GET /api/invoices/{invoice_id}/trace
+ */
+export async function fetchInvoiceAITrace(invoiceId) {
+  const baseUrl = getApiBaseUrl();
+  const response = await fetch(`${baseUrl}/api/invoices/${invoiceId}/trace`, {
+    method: "GET",
+    headers: { "Content-Type": "application/json" },
+  });
+
+  if (!response.ok) {
+    let errorMsg = `Failed to fetch invoice AI trace (${response.status})`;
+    try {
+      const errJson = await response.json();
+      if (errJson && errJson.detail) errorMsg = errJson.detail;
+    } catch {}
+    throw new Error(errorMsg);
+  }
+
+  return await response.json();
+}
+
+
+
