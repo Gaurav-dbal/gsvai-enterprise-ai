@@ -1,6 +1,7 @@
 import os
 import shutil
 import tempfile
+import datetime
 
 # pyrefly: ignore [missing-import]
 from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks, Header, Depends
@@ -89,8 +90,10 @@ from services.email_service import EmailService
 from models.email_models import (
     EmailCreateRequest,
     EmailResponse,
+    EmailApproveReplyRequest,
+    EmailRejectRequest,
 )
-
+from services.email_automation_service import EmailAutomationService
 # =========================================================
 # FastAPI Application
 # =========================================================
@@ -101,7 +104,7 @@ app = FastAPI(
     description="Backend API for GSVAI Enterprise AI Platform: OCI GenAI, Document Intelligence, Oracle Vector DB RAG, Invoice Automation, RBAC, and Oracle Fusion Cloud ERP Integration.",
 )
 
-
+email_automation_service = EmailAutomationService()
 # =========================================================
 # CORS Configuration
 # =========================================================
@@ -137,6 +140,30 @@ class AIWorkspaceChatRequest(BaseModel):
     query_mode: Optional[str] = None
     date_filter: Optional[str] = None
 
+
+@app.post("/api/email-automation/process")
+def process_email_automation():
+    """
+    Process unread emails from the Microsoft 365 mailbox
+    through the GSVAI email automation pipeline.
+    """
+    try:
+        results = (
+            email_automation_service
+            .process_unread_emails(top=10)
+        )
+
+        return {
+            "status": "SUCCESS",
+            "processed_count": len(results),
+            "results": results,
+        }
+
+    except Exception as exc:
+        return {
+            "status": "ERROR",
+            "message": str(exc),
+        }
 
 # =========================================================
 # Health Check
@@ -1825,6 +1852,156 @@ def route_email_endpoint(email_id: str):
             status_code=500,
             detail=f"Failed to route email: {e}",
         )
+
+
+@app.get("/api/email-automation/status")
+def get_email_automation_status():
+    """
+    Returns live connectivity status of Microsoft 365, Microsoft Graph,
+    Oracle DB, OCI Generative AI, and RAG Knowledge Base.
+    """
+    try:
+        return email_automation_service.get_status_overview()
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to get email automation status: {exc}",
+        )
+
+
+@app.get("/api/email-automation/models-config")
+def get_email_automation_models_config():
+    """
+    Returns verified AI model and vector database configuration.
+    """
+    try:
+        return email_automation_service.get_models_config()
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to get models config: {exc}",
+        )
+
+
+@app.get("/api/email-automation/inbox")
+def get_email_automation_inbox(limit: int = 100):
+    """
+    Returns the live list of emails from Oracle DB along with aggregated counters.
+    """
+    try:
+        emails = email_service.list_emails(limit=limit)
+        counts = email_service.get_email_counts()
+        return {
+            "status": "SUCCESS",
+            "emails": emails,
+            "counts": counts,
+            "last_sync": datetime.datetime.utcnow().isoformat() + "Z",
+        }
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to fetch email inbox: {exc}",
+        )
+
+
+@app.post("/api/email-automation/sync")
+def sync_email_automation_inbox(top: int = 20):
+    """
+    Synchronizes new incoming emails from Microsoft 365 into Oracle DB.
+    """
+    try:
+        return email_automation_service.sync_inbox(top=top)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to sync inbox from Microsoft Graph: {exc}",
+        )
+
+
+@app.get("/api/email-automation/{email_id}/details")
+def get_email_automation_details(email_id: str):
+    """
+    Retrieves full email details, AI analysis, RAG sources, suggested response,
+    and the 15-stage AI processing trace.
+    """
+    try:
+        return email_automation_service.get_email_details(email_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to retrieve email details: {exc}",
+        )
+
+
+@app.post("/api/email-automation/{email_id}/retry")
+def retry_email_automation_processing(email_id: str):
+    """
+    Retries AI classification and RAG response drafting for a throttled/failed email.
+    """
+    try:
+        return email_automation_service.retry_processing(email_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to retry email processing: {exc}",
+        )
+
+
+@app.post("/api/email-automation/{email_id}/approve-reply")
+def approve_and_send_email_reply(
+    email_id: str,
+    request: EmailApproveReplyRequest,
+):
+    """
+    MANDATORY HUMAN APPROVAL ENDPOINT.
+    Dispatches reply from GauravBhardwaj@GSVAIEnterpriseAI.onmicrosoft.com
+    via Microsoft Graph, marks email as read, and records the sent reply in Oracle DB.
+    """
+    try:
+        return email_automation_service.approve_and_reply(
+            email_id=email_id,
+            reply_text=request.reply_text,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        print()
+        print("=" * 60)
+        print("MICROSOFT GRAPH REPLY DISPATCH ERROR")
+        print("=" * 60)
+        print(str(exc))
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to dispatch Microsoft Graph reply: {exc}",
+        )
+
+
+@app.post("/api/email-automation/{email_id}/reject")
+def reject_email_automation(
+    email_id: str,
+    request: EmailRejectRequest = EmailRejectRequest(),
+):
+    """
+    Routes email to manual human review without dispatching an AI reply.
+    """
+    try:
+        return email_automation_service.reject_email(
+            email_id=email_id,
+            reason=request.reason,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to route email: {exc}",
+        )
+
+
 # =========================================================
 # Data Assistant & Text-to-SQL Endpoints
 # =========================================================

@@ -26,3 +26,6 @@ backend/wallet/
 *.sso
 *.p12
 *.pem
+
+# Microsoft authentication token cache
+backend/.msal_token_cache.bin

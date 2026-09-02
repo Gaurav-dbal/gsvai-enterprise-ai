@@ -68,6 +68,32 @@ def create_tables():
             else:
                 raise
 
+        # Add new columns to EMAIL if they do not exist
+        cursor.execute("SELECT column_name FROM user_tab_cols WHERE table_name = 'EMAIL'")
+        existing_cols = {row[0].upper() for row in cursor.fetchall()}
+
+        new_columns = [
+            ("ROUTED_AGENT", "VARCHAR2(100)"),
+            ("ROUTING_ACTION", "VARCHAR2(100)"),
+            ("SUGGESTED_REPLY", "CLOB"),
+            ("RAG_SOURCES", "CLOB"),
+            ("TRACE_DATA", "CLOB"),
+            ("ERROR_MESSAGE", "CLOB"),
+            ("REPLY_TEXT", "CLOB"),
+            ("REPLY_SENT_AT", "TIMESTAMP"),
+        ]
+
+        for col_name, col_type in new_columns:
+            if col_name not in existing_cols:
+                try:
+                    cursor.execute(f"ALTER TABLE EMAIL ADD ({col_name} {col_type})")
+                    print(f"SUCCESS: Added column {col_name} to EMAIL.")
+                except Exception as e:
+                    if "ORA-01430" in str(e):
+                        print(f"INFO: Column {col_name} already exists.")
+                    else:
+                        print(f"WARNING: Could not add {col_name}: {e}")
+
         connection.commit()
 
         print("\nEmail automation tables are ready.")

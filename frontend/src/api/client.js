@@ -1066,5 +1066,215 @@ export async function fetchInvoiceAITrace(invoiceId) {
   return await response.json();
 }
 
+// =========================================================
+// Email Automation & AI Triage APIs
+// =========================================================
 
+/**
+ * Fetch live connectivity status for Email Automation
+ * GET /api/email-automation/status
+ */
+export async function fetchEmailAutomationStatus() {
+  const baseUrl = getApiBaseUrl();
+  const response = await fetch(`${baseUrl}/api/email-automation/status`, {
+    method: "GET",
+    headers: { "Content-Type": "application/json" },
+  });
 
+  if (!response.ok) {
+    let errorMsg = `Failed to fetch email status (${response.status})`;
+    try {
+      const errJson = await response.json();
+      if (errJson?.detail) errorMsg = errJson.detail;
+    } catch {}
+    throw new Error(errorMsg);
+  }
+
+  return await response.json();
+}
+
+/**
+ * Fetch verified AI model and vector DB configurations
+ * GET /api/email-automation/models-config
+ */
+export async function fetchEmailModelsConfig() {
+  const baseUrl = getApiBaseUrl();
+  const response = await fetch(`${baseUrl}/api/email-automation/models-config`, {
+    method: "GET",
+    headers: { "Content-Type": "application/json" },
+  });
+
+  if (!response.ok) {
+    let errorMsg = `Failed to fetch models config (${response.status})`;
+    try {
+      const errJson = await response.json();
+      if (errJson?.detail) errorMsg = errJson.detail;
+    } catch {}
+    throw new Error(errorMsg);
+  }
+
+  return await response.json();
+}
+
+/**
+ * Fetch live email inbox from Oracle DB
+ * GET /api/email-automation/inbox
+ */
+export async function fetchEmailInbox(limit = 100) {
+  const baseUrl = getApiBaseUrl();
+  const response = await fetch(`${baseUrl}/api/email-automation/inbox?limit=${limit}`, {
+    method: "GET",
+    headers: { "Content-Type": "application/json" },
+  });
+
+  if (!response.ok) {
+    let errorMsg = `Failed to fetch email inbox (${response.status})`;
+    try {
+      const errJson = await response.json();
+      if (errJson?.detail) errorMsg = errJson.detail;
+    } catch {}
+    throw new Error(errorMsg);
+  }
+
+  return await response.json();
+}
+
+/**
+ * Sync latest emails from Microsoft Graph into Oracle DB
+ * POST /api/email-automation/sync
+ */
+export async function syncEmailInbox(top = 20) {
+  const baseUrl = getApiBaseUrl();
+  const response = await fetch(`${baseUrl}/api/email-automation/sync?top=${top}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+  });
+
+  if (!response.ok) {
+    let errorMsg = `Failed to sync inbox (${response.status})`;
+    try {
+      const errJson = await response.json();
+      if (errJson?.detail) errorMsg = errJson.detail;
+    } catch {}
+    throw new Error(errorMsg);
+  }
+
+  return await response.json();
+}
+
+/**
+ * Process unread emails through AI pipeline (Stops at Human Approval)
+ * POST /api/email-automation/process
+ */
+export async function processNewEmails() {
+  const baseUrl = getApiBaseUrl();
+  const response = await fetch(`${baseUrl}/api/email-automation/process`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+  });
+
+  if (!response.ok) {
+    let errorMsg = `Failed to process emails (${response.status})`;
+    try {
+      const errJson = await response.json();
+      if (errJson?.detail) errorMsg = errJson.detail;
+    } catch {}
+    throw new Error(errorMsg);
+  }
+
+  return await response.json();
+}
+
+/**
+ * Fetch full email record, analysis, RAG sources, draft and 15-stage trace
+ * GET /api/email-automation/{email_id}/details
+ */
+export async function fetchEmailDetails(emailId) {
+  const baseUrl = getApiBaseUrl();
+  const response = await fetch(`${baseUrl}/api/email-automation/${encodeURIComponent(emailId)}/details`, {
+    method: "GET",
+    headers: { "Content-Type": "application/json" },
+  });
+
+  if (!response.ok) {
+    let errorMsg = `Failed to fetch email details (${response.status})`;
+    try {
+      const errJson = await response.json();
+      if (errJson?.detail) errorMsg = errJson.detail;
+    } catch {}
+    throw new Error(errorMsg);
+  }
+
+  return await response.json();
+}
+
+/**
+ * Retry processing for a throttled email
+ * POST /api/email-automation/{email_id}/retry
+ */
+export async function retryEmailProcessing(emailId) {
+  const baseUrl = getApiBaseUrl();
+  const response = await fetch(`${baseUrl}/api/email-automation/${encodeURIComponent(emailId)}/retry`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+  });
+
+  if (!response.ok) {
+    let errorMsg = `Failed to retry email processing (${response.status})`;
+    try {
+      const errJson = await response.json();
+      if (errJson?.detail) errorMsg = errJson.detail;
+    } catch {}
+    throw new Error(errorMsg);
+  }
+
+  return await response.json();
+}
+
+/**
+ * Human Approval: Dispatch reply via Microsoft Graph
+ * POST /api/email-automation/{email_id}/approve-reply
+ */
+export async function approveAndSendEmailReply(emailId, replyText) {
+  const baseUrl = getApiBaseUrl();
+  const response = await fetch(`${baseUrl}/api/email-automation/${encodeURIComponent(emailId)}/approve-reply`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ reply_text: replyText }),
+  });
+
+  if (!response.ok) {
+    let errorMsg = `Failed to approve and send reply (${response.status})`;
+    try {
+      const errJson = await response.json();
+      if (errJson?.detail) errorMsg = errJson.detail;
+    } catch {}
+    throw new Error(errorMsg);
+  }
+
+  return await response.json();
+}
+
+/**
+ * Reject or route email to human review
+ * POST /api/email-automation/{email_id}/reject
+ */
+export async function rejectEmail(emailId, reason = "Sent to manual review") {
+  const baseUrl = getApiBaseUrl();
+  const response = await fetch(`${baseUrl}/api/email-automation/${encodeURIComponent(emailId)}/reject`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ reason }),
+  });
+
+  if (!response.ok) {
+    let errorMsg = `Failed to route email (${response.status})`;
+    try {
+      const errJson = await response.json();
+      if (errJson?.detail) errorMsg = errJson.detail;
+    } catch {}
+    throw new Error(errorMsg);
+  }
+
+  return await response.json();
+}

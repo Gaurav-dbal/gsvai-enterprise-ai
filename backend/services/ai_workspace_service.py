@@ -140,6 +140,7 @@ def process_workspace_document(file_path: str, filename: Optional[str] = None) -
         document_id = ingest_res.get("document_id") if isinstance(ingest_res, dict) else ingest_res
         chunks_count = ingest_res.get("chunks", 1) if isinstance(ingest_res, dict) else 1
     else:
+        # pyrefly: ignore [unexpected-keyword]
         ingest_res = ingest_pdf(file_path=file_path, filename=filename)
         document_id = ingest_res.get("document_id") if isinstance(ingest_res, dict) else ingest_res
         chunks_count = ingest_res.get("chunks", 1) if isinstance(ingest_res, dict) else 1

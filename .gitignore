@@ -1,0 +1,7 @@
+
+# Microsoft authentication token cache
+backend/.msal_token_cache.bin
+
+# Python cache
+__pycache__/
+*.pyc
