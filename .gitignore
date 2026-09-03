@@ -1,7 +1,113 @@
+# Environment / Secrets
+.env
+.env.*
+!.env.example
 
-# Microsoft authentication token cache
+# Oracle Wallet / Certificates
+backend/wallet/
+*.sso
+*.p12
+*.pem
+*.jks
+*.key
+
+# Microsoft Authentication
 backend/.msal_token_cache.bin
 
-# Python cache
+# Python
+.venv/
+venv/
+env/
 __pycache__/
-*.pyc
+**/__pycache__/
+*.py[cod]
+*$py.class
+
+# Node / React
+node_modules/
+frontend/node_modules/
+frontend/dist/
+frontend/dist-ssr/
+
+# Logs
+*.log
+logs/
+
+# IDE / OS
+.vscode/*
+!.vscode/extensions.json
+.idea/
+.DS_Store
+*.suo
+*.user
+*.userosscache
+*.sln
+
+# Test / Coverage
+.pytest_cache/
+.coverage
+htmlcov/
+.coverage.*
+
+# Build / Temporary
+build/
+dist/
+*.tmp
+*.temp
+EOFcat > .gitignore <<'EOF'
+# Environment / Secrets
+.env
+.env.*
+!.env.example
+
+# Oracle Wallet / Certificates
+backend/wallet/
+*.sso
+*.p12
+*.pem
+*.jks
+*.key
+
+# Microsoft Authentication
+backend/.msal_token_cache.bin
+
+# Python
+.venv/
+venv/
+env/
+__pycache__/
+**/__pycache__/
+*.py[cod]
+*$py.class
+
+# Node / React
+node_modules/
+frontend/node_modules/
+frontend/dist/
+frontend/dist-ssr/
+
+# Logs
+*.log
+logs/
+
+# IDE / OS
+.vscode/*
+!.vscode/extensions.json
+.idea/
+.DS_Store
+*.suo
+*.user
+*.userosscache
+*.sln
+
+# Test / Coverage
+.pytest_cache/
+.coverage
+htmlcov/
+.coverage.*
+
+# Build / Temporary
+build/
+dist/
+*.tmp
+*.temp
