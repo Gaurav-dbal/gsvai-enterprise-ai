@@ -17,6 +17,7 @@ from pydantic import BaseModel
 import oracledb
 
 from services.rag_service import answer_question
+from services.ai_runtime_config import get_ai_runtime_config
 from services.document_ingestion_service import ingest_pdf, ingest_document_pages
 from services.oci_document_understanding_service import (
     analyze_document_with_oci,
@@ -176,6 +177,7 @@ def health_check():
         "status": "healthy",
         "service": "GSVAI",
         "version": "0.1.0",
+        "ai_runtime": get_ai_runtime_config(),
     }
 
 
@@ -1948,6 +1950,22 @@ def retry_email_automation_processing(email_id: str):
         raise HTTPException(
             status_code=500,
             detail=f"Failed to retry email processing: {exc}",
+        )
+
+
+@app.post("/api/email-automation/{email_id}/reprocess")
+def reprocess_email_automation(email_id: str):
+    """
+    Explicitly re-runs AI analysis and routing for any existing email record.
+    """
+    try:
+        return email_automation_service.reprocess_email(email_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to reprocess email: {exc}",
         )
 
 

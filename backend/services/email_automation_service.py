@@ -8,6 +8,15 @@ from repositories.email_repository import EmailRepository
 from services.email_service import EmailService
 from services.microsoft_email_service import MicrosoftEmailService
 from services.semantic_search_service import search_similar_chunks_with_telemetry
+from services.email_system_notification import (
+    is_system_notification,
+    detect_system_notification,
+)
+from services.ai_runtime_config import (
+    get_ai_runtime_config,
+    format_rate_limit_error,
+    get_llm_runtime_health,
+)
 
 
 def _clean_text(text: str) -> str:
@@ -26,7 +35,7 @@ class EmailAutomationService:
     """
     End-to-end orchestration for Microsoft 365 Mailbox -> Microsoft Graph ->
     Oracle DB -> Email Analyzer -> Agent Router -> Oracle Vector Search RAG ->
-    OCI LLM -> Human Approval Gate -> Microsoft Graph Reply Dispatch.
+    Active LLM -> Human Approval Gate -> Microsoft Graph Reply Dispatch.
     """
 
     def __init__(self):
@@ -41,7 +50,8 @@ class EmailAutomationService:
     def get_status_overview(self) -> dict:
         """
         Returns live connectivity status for all subsystems:
-        Microsoft 365, Microsoft Graph, Oracle DB, OCI GenAI, and RAG Knowledge Base.
+        Microsoft 365, Microsoft Graph, Oracle DB, active LLM, and RAG Knowledge Base.
+        Decoupled from historical database error logs.
         """
         ms_conn = self.microsoft_email_service.check_connection()
 
@@ -63,14 +73,10 @@ class EmailAutomationService:
             print(f"[EmailAutomationService] DB check warning: {e}")
             db_connected = False
 
-        # Check OCI GenAI status
-        oci_status = "operational"
-        oci_message = "OCI Generative AI operational (google.gemini-2.5-flash)"
-        # Check if recent emails have experienced throttling
+        # Live runtime health of active LLM and configuration
+        llm_health = get_llm_runtime_health()
+        ai_cfg = get_ai_runtime_config()
         counts = self.email_repository.get_email_counts()
-        if counts.get("throttled_count", 0) > 0:
-            oci_status = "throttled"
-            oci_message = "OCI Generative AI temporarily throttled (HTTP 429)"
 
         return {
             "microsoft_365": {
@@ -86,20 +92,32 @@ class EmailAutomationService:
             },
             "oracle_db": {
                 "status": "connected" if db_connected else "degraded",
-                "database_name": "Oracle Autonomous Database (Vector DB)",
+                "database_name": ai_cfg["vector_database"]["database_name"],
                 "label": "Connected" if db_connected else "Disconnected",
             },
+            "llm": {
+                "provider": llm_health["provider"],
+                "model": llm_health["model"],
+                "status": llm_health["status"],
+                "label": llm_health["label"],
+                "message": llm_health["message"],
+            },
+            # Backward-compatible key for older consumers
             "oci_generative_ai": {
-                "status": oci_status,
-                "model_id": "google.gemini-2.5-flash",
-                "label": "Connected" if oci_status == "operational" else "Temporarily throttled",
-                "message": oci_message,
+                "provider": llm_health["provider"],
+                "status": llm_health["status"],
+                "model_id": llm_health["model"],
+                "label": llm_health["label"],
+                "message": llm_health["message"],
             },
             "rag_knowledge_base": {
                 "status": "connected" if db_connected else "degraded",
                 "documents_count": docs_count,
                 "chunks_count": chunks_count,
-                "embedding_model": "cohere.embed-v4.0",
+                "embedding_provider": ai_cfg["embedding"]["provider"],
+                "embedding_model": ai_cfg["embedding"]["model"],
+                "embedding_dimensions": ai_cfg["embedding"]["dimensions"],
+                "vector_database": ai_cfg["vector_database"]["provider"],
                 "label": "Connected",
             },
             "inbox_counts": counts,
@@ -107,15 +125,19 @@ class EmailAutomationService:
         }
 
     def get_models_config(self) -> dict:
-        """Returns verified AI Model details."""
+        """Returns verified AI Model and Vector DB details dynamically."""
+        ai_cfg = get_ai_runtime_config()
         return {
-            "embedding_model": "cohere.embed-v4.0",
-            "llm_model": "google.gemini-2.5-flash",
-            "region": "ap-hyderabad-1",
-            "vector_database": "Oracle AI Vector Search",
-            "llm_provider": "OCI Generative AI",
+            "embedding_provider": ai_cfg["embedding"]["provider"],
+            "embedding_model": ai_cfg["embedding"]["model"],
+            "embedding_dimensions": ai_cfg["embedding"]["dimensions"],
+            "llm_provider": ai_cfg["llm"]["provider"],
+            "llm_model": ai_cfg["llm"]["model"],
+            "vector_database": ai_cfg["vector_database"]["provider"],
+            "vector_dimensions": ai_cfg["vector_database"]["dimensions"],
             "mailbox": "GauravBhardwaj@GSVAIEnterpriseAI.onmicrosoft.com",
             "graph_endpoint": "https://graph.microsoft.com/v1.0",
+            "region": ai_cfg["llm"].get("region"),
         }
 
     # =========================================================
@@ -143,6 +165,22 @@ class EmailAutomationService:
 
                 existing = self.email_repository.get_email_by_message_id(msg_id)
                 if not existing:
+                    # Check if an existing record in DB has no message_id but matches this Graph message
+                    sender = msg.get("sender", {}).get("emailAddress", {})
+                    sender_addr = sender.get("address", "").strip().lower()
+                    subj = (msg.get("subject") or "").strip().lower()
+
+                    for candidate in self.email_service.list_emails(limit=100):
+                        if (
+                            not candidate.get("message_id")
+                            and (candidate.get("sender_email") or "").strip().lower() == sender_addr
+                            and (candidate.get("subject") or "").strip().lower() == subj
+                        ):
+                            self.email_repository.update_email(candidate["email_id"], message_id=msg_id)
+                            existing = candidate
+                            break
+
+                if not existing:
                     sender = msg.get("sender", {}).get("emailAddress", {})
                     recipients = msg.get("toRecipients", [])
                     recipient_email = recipients[0].get("emailAddress", {}).get("address", "") if recipients else ""
@@ -157,7 +195,8 @@ class EmailAutomationService:
                             received_dt = datetime.datetime.now()
 
                     is_read = msg.get("isRead", False)
-                    initial_status = "RECEIVED" if is_read else "UNREAD"
+                    is_ndr = is_system_notification(msg)
+                    initial_status = "SYSTEM_NOTIFICATION" if is_ndr else ("RECEIVED" if is_read else "UNREAD")
 
                     create_req = EmailCreateRequest(
                         sender_email=sender.get("address") or "unknown@sender.com",
@@ -168,15 +207,70 @@ class EmailAutomationService:
                         message_id=msg_id,
                     )
                     created = self.email_service.create_email(create_req)
-                    # Update status to reflect read/unread
-                    self.email_repository.update_email(created.email_id, status=initial_status)
+
+                    if is_ndr:
+                        det = detect_system_notification(msg)
+                        ndr_trace = self._build_trace(
+                            email={"email_id": created.email_id, "sender_email": create_req.sender_email, "subject": create_req.subject, "received_date": received_dt},
+                            status="SYSTEM_NOTIFICATION",
+                            error_msg=det["reason"],
+                        )
+                        self.email_repository.update_email(
+                            created.email_id,
+                            status="SYSTEM_NOTIFICATION",
+                            routed_agent="system_notification",
+                            routing_action="ignore_system_notification",
+                            trace_data=ndr_trace,
+                        )
+                    else:
+                        self.email_repository.update_email(created.email_id, status=initial_status)
                     new_count += 1
                 else:
                     # If message_id was missing on existing record, update it
                     if not existing.get("message_id"):
                         self.email_repository.update_email(existing["email_id"], message_id=msg_id)
+
+                    # Retroactively normalize existing record if it is an NDR
+                    if is_system_notification(existing) and existing.get("status") != "SYSTEM_NOTIFICATION":
+                        det = detect_system_notification(existing)
+                        ndr_trace = self._build_trace(
+                            email=existing,
+                            status="SYSTEM_NOTIFICATION",
+                            error_msg=det["reason"],
+                        )
+                        self.email_repository.update_email(
+                            existing["email_id"],
+                            status="SYSTEM_NOTIFICATION",
+                            routed_agent="system_notification",
+                            routing_action="ignore_system_notification",
+                            suggested_reply=None,
+                            rag_sources=[],
+                            trace_data=ndr_trace,
+                        )
         except Exception as e:
             print(f"[EmailAutomationService] sync_inbox Graph fetch warning: {e}")
+
+        # Retroactively normalize any previously stored NDR emails in the database
+        try:
+            for stored in self.email_service.list_emails(limit=100):
+                if is_system_notification(stored) and stored.get("status") in ("UNREAD", "RECEIVED", "AWAITING_APPROVAL", "ROUTED"):
+                    det = detect_system_notification(stored)
+                    ndr_trace = self._build_trace(
+                        email=stored,
+                        status="SYSTEM_NOTIFICATION",
+                        error_msg=det["reason"],
+                    )
+                    self.email_repository.update_email(
+                        stored["email_id"],
+                        status="SYSTEM_NOTIFICATION",
+                        routed_agent="system_notification",
+                        routing_action="ignore_system_notification",
+                        suggested_reply=None,
+                        rag_sources=[],
+                        trace_data=ndr_trace,
+                    )
+        except Exception as norm_err:
+            print(f"[EmailAutomationService] NDR retroactive normalization warning: {norm_err}")
 
         emails = self.email_service.list_emails(limit=100)
         counts = self.email_repository.get_email_counts()
@@ -216,6 +310,15 @@ class EmailAutomationService:
         has_route = bool(routing)
         agent_name = (routing or {}).get("agent") or (analysis or {}).get("recommended_action") or "rag_agent"
         is_rag = "rag" in str(agent_name).lower()
+
+        ai_cfg = get_ai_runtime_config()
+        llm_prov = ai_cfg["llm"]["provider"]
+        llm_mod = ai_cfg["llm"]["model"]
+        emb_prov = ai_cfg["embedding"]["provider"]
+        emb_mod = ai_cfg["embedding"]["model"]
+        vdb_prov = ai_cfg["vector_database"]["provider"]
+        vdb_tab = ai_cfg["vector_database"]["table"]
+        vdb_metric = ai_cfg["vector_database"]["metric"]
 
         # Step 1: Mailbox
         trace = [
@@ -257,6 +360,127 @@ class EmailAutomationService:
             },
         ]
 
+        # Handle System Notifications (Exchange NDRs) deterministically
+        if status == "SYSTEM_NOTIFICATION":
+            ndr_reason = error_msg or (analysis or {}).get("reasoning_summary") or "Microsoft 365 Exchange Non-Delivery Report (NDR) detected"
+            trace.extend([
+                {
+                    "step": 4,
+                    "name": "Deterministic System Filter",
+                    "status": "completed",
+                    "timestamp": now_iso,
+                    "summary": "Exchange Non-Delivery Report (NDR) identified by multi-signal filter",
+                    "details": {
+                        "classification": "System Delivery Failure Notification",
+                        "detection_engine": "Deterministic Multi-Signal Rule Engine",
+                        "reason": ndr_reason,
+                        "ai_action": "Bypassed Groq LLM to prevent automated email bounce loops",
+                    },
+                },
+                {
+                    "step": 5,
+                    "name": "Agent Router",
+                    "status": "completed",
+                    "timestamp": now_iso,
+                    "summary": "Assigned to System Notification Guard (No Business Agent)",
+                    "details": {
+                        "routed_agent": "system_notification",
+                        "action": "ignore_system_notification",
+                        "decision": "Bypass autonomous business agents",
+                    },
+                },
+                {
+                    "step": 6,
+                    "name": "Selected Agent",
+                    "status": "completed",
+                    "timestamp": now_iso,
+                    "summary": "Active: System Notification Guard",
+                    "details": {
+                        "handler": "system_notification_guard",
+                        "status": "Audited in Oracle DB without outbound dispatch",
+                    },
+                },
+                {
+                    "step": 7,
+                    "name": "Semantic Search",
+                    "status": "skipped",
+                    "timestamp": None,
+                    "summary": "Skipped (NDR requires no knowledge search)",
+                    "details": {},
+                },
+                {
+                    "step": 8,
+                    "name": "Sentence Transformers Embedding",
+                    "status": "skipped",
+                    "timestamp": None,
+                    "summary": f"Skipped ({emb_prov} {emb_mod})",
+                    "details": {},
+                },
+                {
+                    "step": 9,
+                    "name": "Oracle AI Vector Search",
+                    "status": "skipped",
+                    "timestamp": None,
+                    "summary": f"Skipped ({vdb_prov})",
+                    "details": {},
+                },
+                {
+                    "step": 10,
+                    "name": "Retrieved Knowledge",
+                    "status": "skipped",
+                    "timestamp": None,
+                    "summary": "Skipped (No enterprise documents retrieved)",
+                    "details": {},
+                },
+                {
+                    "step": 11,
+                    "name": f"{llm_prov} LLM",
+                    "status": "skipped",
+                    "timestamp": None,
+                    "summary": f"Skipped ({llm_prov} draft synthesis bypassed to prevent mail bounce loop)",
+                    "details": {
+                        "provider": llm_prov,
+                        "model": llm_mod,
+                        "bypass_reason": "Automated system delivery reports must never trigger automated AI responses",
+                    },
+                },
+                {
+                    "step": 12,
+                    "name": "AI Response Draft",
+                    "status": "skipped",
+                    "timestamp": None,
+                    "summary": "Skipped (No draft prepared for NDR)",
+                    "details": {},
+                },
+                {
+                    "step": 13,
+                    "name": "HUMAN APPROVAL",
+                    "status": "skipped",
+                    "timestamp": None,
+                    "summary": "Not Required (Archived system notification)",
+                    "details": {
+                        "status": "Audited in Oracle DB. No human reply required.",
+                    },
+                },
+                {
+                    "step": 14,
+                    "name": "Microsoft Graph Reply",
+                    "status": "skipped",
+                    "timestamp": None,
+                    "summary": "Bypassed (Outbound replies to system mailers strictly prohibited)",
+                    "details": {},
+                },
+                {
+                    "step": 15,
+                    "name": "Sender Receives Reply",
+                    "status": "skipped",
+                    "timestamp": None,
+                    "summary": "Terminal (No response sent)",
+                    "details": {},
+                },
+            ])
+            return trace
+
         # Step 4: AI Email Analyzer
         if throttled:
             trace.append({
@@ -264,11 +488,12 @@ class EmailAutomationService:
                 "name": "AI Email Analyzer",
                 "status": "throttled",
                 "timestamp": now_iso,
-                "summary": "OCI Generative AI temporarily throttled (HTTP 429)",
+                "summary": f"{llm_prov} temporarily rate limited (HTTP 429)",
                 "details": {
-                    "model": "google.gemini-2.5-flash",
-                    "issue": error_msg or "OCI Generative AI is temporarily throttled (HTTP 429). Email safely preserved in Oracle DB.",
-                    "action_required": "Click 'Retry Processing' to re-invoke analysis.",
+                    "model": llm_mod,
+                    "provider": llm_prov,
+                    "issue": error_msg or format_rate_limit_error(llm_prov, llm_mod),
+                    "action_required": "Click 'Reprocess AI' to re-invoke analysis.",
                 },
             })
         elif has_analysis:
@@ -279,7 +504,8 @@ class EmailAutomationService:
                 "timestamp": now_iso,
                 "summary": f"Classified as {analysis.get('email_type', 'General')} ({analysis.get('priority', 'Medium')} Priority)",
                 "details": {
-                    "model": "google.gemini-2.5-flash",
+                    "model": llm_mod,
+                    "provider": llm_prov,
                     "confidence": f"{float(analysis.get('confidence') or 0.95) * 100:.1f}%",
                     "extracted_entities": analysis.get("extracted_data") or {},
                 },
@@ -327,7 +553,7 @@ class EmailAutomationService:
                 "summary": f"Active: {agent_name.replace('_', ' ').title()}",
                 "details": {
                     "agent": agent_name,
-                    "target_pipeline": "Oracle AI Vector Search + OCI GenAI",
+                    "target_pipeline": f"{vdb_prov} + {llm_prov} ({llm_mod})",
                 },
             })
         else:
@@ -362,16 +588,17 @@ class EmailAutomationService:
                 "details": {},
             })
 
-        # Step 8: OCI Embedding
+        # Step 8: Query Embedding
         if is_rag or (rag_sources and len(rag_sources) > 0):
             trace.append({
                 "step": 8,
-                "name": "OCI Embedding",
+                "name": "Query Embedding",
                 "status": "completed",
                 "timestamp": now_iso,
-                "summary": "Generated 1024-dim dense vector using cohere.embed-v4.0",
+                "summary": f"Generated 1024-dim dense vector using {emb_mod}",
                 "details": {
-                    "model": "cohere.embed-v4.0",
+                    "provider": emb_prov,
+                    "model": emb_mod,
                     "dimensions": 1024,
                     "input_type": "SEARCH_DOCUMENT",
                 },
@@ -379,10 +606,10 @@ class EmailAutomationService:
         else:
             trace.append({
                 "step": 8,
-                "name": "OCI Embedding",
+                "name": "Query Embedding",
                 "status": "pending" if not throttled else "skipped",
                 "timestamp": None,
-                "summary": "Cohere Embed v4.0 vector encoding",
+                "summary": f"{emb_mod} vector encoding",
                 "details": {},
             })
 
@@ -394,10 +621,11 @@ class EmailAutomationService:
                 "name": "Oracle AI Vector Search",
                 "status": "completed",
                 "timestamp": now_iso,
-                "summary": f"Executed COSINE distance search ({sources_count} chunks matched)",
+                "summary": f"Executed {vdb_metric} distance search ({sources_count} chunks matched)",
                 "details": {
-                    "table": "GSVAI_DOCUMENT_CHUNKS",
-                    "metric": "COSINE distance",
+                    "provider": vdb_prov,
+                    "table": vdb_tab,
+                    "metric": f"{vdb_metric} distance",
                     "top_k": 5,
                 },
             })
@@ -407,7 +635,7 @@ class EmailAutomationService:
                 "name": "Oracle AI Vector Search",
                 "status": "pending" if not throttled else "skipped",
                 "timestamp": None,
-                "summary": "Cosine vector search on Oracle DB",
+                "summary": f"{vdb_metric} vector search on {vdb_prov}",
                 "details": {},
             })
 
@@ -434,40 +662,39 @@ class EmailAutomationService:
                 "details": {},
             })
 
-        # Step 11: OCI LLM
+        # Step 11: LLM Draft Generation
         if reply_draft:
             trace.append({
                 "step": 11,
-                "name": "OCI LLM",
+                "name": f"{llm_prov} LLM",
                 "status": "completed",
                 "timestamp": now_iso,
-                "summary": "Drafted contextual response using google.gemini-2.5-flash",
+                "summary": f"Drafted contextual response using {llm_mod}",
                 "details": {
-                    "model": "google.gemini-2.5-flash",
-                    "provider": "OCI Generative AI",
-                    "region": "ap-hyderabad-1",
+                    "model": llm_mod,
+                    "provider": llm_prov,
                     "temperature": 0.2,
                 },
             })
         elif throttled:
             trace.append({
                 "step": 11,
-                "name": "OCI LLM",
+                "name": f"{llm_prov} LLM",
                 "status": "throttled",
                 "timestamp": now_iso,
-                "summary": "OCI Generative AI temporarily throttled (HTTP 429)",
+                "summary": f"{llm_prov} temporarily rate limited (HTTP 429)",
                 "details": {
                     "status": "temporarily_throttled",
-                    "error": error_msg or "HTTP 429 throttling active. Draft generation will proceed on retry.",
+                    "error": error_msg or format_rate_limit_error(llm_prov, llm_mod),
                 },
             })
         else:
             trace.append({
                 "step": 11,
-                "name": "OCI LLM",
+                "name": f"{llm_prov} LLM",
                 "status": "pending",
                 "timestamp": None,
-                "summary": "Gemini 2.5 Flash response generation",
+                "summary": f"{llm_mod} response generation",
                 "details": {},
             })
 
@@ -552,8 +779,25 @@ class EmailAutomationService:
                 if not msg_id:
                     continue
                 existing = self.email_repository.get_email_by_message_id(msg_id)
+                sender = msg.get("sender", {}).get("emailAddress", {})
+                sender_addr = (sender.get("address") or "").strip().lower()
+                subj = (msg.get("subject") or "").strip().lower()
+
                 if not existing:
-                    sender = msg.get("sender", {}).get("emailAddress", {})
+                    # Check if an existing record in DB has no message_id but matches this message
+                    for candidate in self.email_service.list_emails(limit=100):
+                        cand_sender = (candidate.get("sender_email") or "").strip().lower()
+                        cand_sub = (candidate.get("subject") or "").strip().lower()
+                        if (
+                            not candidate.get("message_id")
+                            and (cand_sender == sender_addr or (subj and cand_sub and (subj in cand_sub or cand_sub in subj)))
+                        ):
+                            print(f"[EmailAutomationService] process_unread_emails: Backfilling message_id for {candidate['email_id']}")
+                            self.email_repository.update_email(candidate["email_id"], message_id=msg_id)
+                            existing = candidate
+                            break
+
+                if not existing:
                     recipients = msg.get("toRecipients", [])
                     recipient_email = recipients[0].get("emailAddress", {}).get("address", "") if recipients else ""
                     received_raw = msg.get("receivedDateTime")
@@ -565,6 +809,7 @@ class EmailAutomationService:
                         except Exception:
                             pass
 
+                    is_ndr = is_system_notification(msg)
                     req = EmailCreateRequest(
                         sender_email=sender.get("address") or "unknown@sender.com",
                         recipient_email=recipient_email,
@@ -574,7 +819,22 @@ class EmailAutomationService:
                         message_id=msg_id,
                     )
                     created = self.email_service.create_email(req)
-                    self.email_repository.update_email(created.email_id, status="UNREAD")
+                    if is_ndr:
+                        det = detect_system_notification(msg)
+                        ndr_trace = self._build_trace(
+                            email={"email_id": created.email_id, "sender_email": req.sender_email, "subject": req.subject, "received_date": received_dt},
+                            status="SYSTEM_NOTIFICATION",
+                            error_msg=det["reason"],
+                        )
+                        self.email_repository.update_email(
+                            created.email_id,
+                            status="SYSTEM_NOTIFICATION",
+                            routed_agent="system_notification",
+                            routing_action="ignore_system_notification",
+                            trace_data=ndr_trace,
+                        )
+                    else:
+                        self.email_repository.update_email(created.email_id, status="UNREAD")
         except Exception as e:
             print(f"[EmailAutomationService] Microsoft Graph unread fetch warning: {e}")
 
@@ -589,6 +849,59 @@ class EmailAutomationService:
 
         for email in unprocessed:
             email_id = email["email_id"]
+
+            # Deterministic check for Microsoft 365 Exchange NDR / delivery notifications BEFORE Groq AI Analysis
+            detection = detect_system_notification(email)
+            if detection["is_system_notification"]:
+                print(f"[EmailAutomationService] Skipping {email_id}: System Notification / NDR detected ({detection['category']}).")
+                ndr_trace = self._build_trace(
+                    email=email,
+                    analysis={
+                        "email_type": "system_notification",
+                        "priority": "low",
+                        "confidence": 1.0,
+                        "recommended_action": "ignore_system_notification",
+                        "reasoning_summary": detection["reason"],
+                    },
+                    routing={"agent": "system_notification", "action": "ignore_system_notification"},
+                    status="SYSTEM_NOTIFICATION",
+                    error_msg=detection["reason"],
+                )
+                self.email_repository.update_email(
+                    email_id,
+                    status="SYSTEM_NOTIFICATION",
+                    routed_agent="system_notification",
+                    routing_action="ignore_system_notification",
+                    suggested_reply=None,
+                    rag_sources=[],
+                    trace_data=ndr_trace,
+                    error_message=detection["reason"],
+                )
+                results.append({
+                    "email_id": email_id,
+                    "message_id": email.get("message_id"),
+                    "status": "SYSTEM_NOTIFICATION",
+                    "analysis": {
+                        "email_type": "system_notification",
+                        "priority": "low",
+                        "confidence": 1.0,
+                        "recommended_action": "ignore_system_notification",
+                        "reasoning_summary": detection["reason"],
+                    },
+                    "routing": {
+                        "agent": "system_notification",
+                        "action": "ignore_system_notification",
+                        "status": "SYSTEM_NOTIFICATION",
+                    },
+                    "suggested_reply": None,
+                    "rag_sources": [],
+                    "throttled": False,
+                    "error_message": None,
+                    "trace": ndr_trace,
+                })
+                continue
+
+            self.email_repository.update_email(email_id, status="PROCESSING")
             analysis = None
             routing = None
             rag_sources = []
@@ -604,9 +917,10 @@ class EmailAutomationService:
                     error_msg = analysis.get("error_message")
             except Exception as e:
                 err_str = str(e).lower()
-                if "429" in err_str or "throttl" in err_str:
+                if "429" in err_str or "throttl" in err_str or "rate limit" in err_str:
                     is_throttled = True
-                    error_msg = "OCI Generative AI is temporarily throttled (HTTP 429)."
+                    ai_cfg = get_ai_runtime_config()
+                    error_msg = format_rate_limit_error(ai_cfg["llm"]["provider"], ai_cfg["llm"]["model"])
                     self.email_repository.update_email(email_id, status="AI_THROTTLED", error_message=error_msg)
                 else:
                     print(f"Analysis error for {email_id}: {e}")
@@ -625,9 +939,10 @@ class EmailAutomationService:
                         suggested_reply = routing.get("answer")
                 except Exception as e:
                     err_str = str(e).lower()
-                    if "429" in err_str or "throttl" in err_str:
+                    if "429" in err_str or "throttl" in err_str or "rate limit" in err_str:
                         is_throttled = True
-                        error_msg = "OCI Generative AI is temporarily throttled (HTTP 429)."
+                        ai_cfg = get_ai_runtime_config()
+                        error_msg = format_rate_limit_error(ai_cfg["llm"]["provider"], ai_cfg["llm"]["model"])
                         self.email_repository.update_email(email_id, status="AI_THROTTLED", error_message=error_msg)
                     else:
                         print(f"Routing error for {email_id}: {e}")
@@ -706,18 +1021,49 @@ class EmailAutomationService:
         return email
 
     # =========================================================
-    # Retry Processing for Throttled Email
+    # Reprocess AI / Retry Processing
     # =========================================================
 
-    def retry_processing(self, email_id: str) -> dict:
+    def reprocess_email(self, email_id: str) -> dict:
         """
-        Retry AI analysis and RAG processing for an email that was throttled.
+        Explicitly re-run AI analysis and routing for any existing email record
+        (e.g., ROUTED, AWAITING_APPROVAL, AI_THROTTLED).
+        Does NOT send duplicate emails; safely updates the existing record with
+        fresh analysis, routing, RAG context, and 15-stage pipeline trace.
         """
         email = self.email_service.get_email_full(email_id)
         if not email:
             raise ValueError(f"Email not found: {email_id}")
 
-        self.email_repository.update_email(email_id, status="ANALYZING", error_message=None)
+        # Deterministic check: Bypasses LLM and autonomous agents for NDRs
+        detection = detect_system_notification(email)
+        if detection["is_system_notification"]:
+            ndr_trace = self._build_trace(
+                email=email,
+                analysis={
+                    "email_type": "system_notification",
+                    "priority": "low",
+                    "confidence": 1.0,
+                    "recommended_action": "ignore_system_notification",
+                    "reasoning_summary": detection["reason"],
+                },
+                routing={"agent": "system_notification", "action": "ignore_system_notification"},
+                status="SYSTEM_NOTIFICATION",
+                error_msg=detection["reason"],
+            )
+            self.email_repository.update_email(
+                email_id,
+                status="SYSTEM_NOTIFICATION",
+                routed_agent="system_notification",
+                routing_action="ignore_system_notification",
+                suggested_reply=None,
+                rag_sources=[],
+                trace_data=ndr_trace,
+                error_message=detection["reason"],
+            )
+            return self.get_email_details(email_id)
+
+        self.email_repository.update_email(email_id, status="PROCESSING", error_message=None)
 
         analysis = None
         routing = None
@@ -733,9 +1079,10 @@ class EmailAutomationService:
                 error_msg = analysis.get("error_message")
         except Exception as e:
             err_str = str(e).lower()
-            if "429" in err_str or "throttl" in err_str:
+            if "429" in err_str or "throttl" in err_str or "rate limit" in err_str:
                 is_throttled = True
-                error_msg = "OCI Generative AI is temporarily throttled (HTTP 429)."
+                ai_cfg = get_ai_runtime_config()
+                error_msg = format_rate_limit_error(ai_cfg["llm"]["provider"], ai_cfg["llm"]["model"])
             else:
                 raise
 
@@ -751,9 +1098,10 @@ class EmailAutomationService:
                     suggested_reply = routing.get("answer")
             except Exception as e:
                 err_str = str(e).lower()
-                if "429" in err_str or "throttl" in err_str:
+                if "429" in err_str or "throttl" in err_str or "rate limit" in err_str:
                     is_throttled = True
-                    error_msg = "OCI Generative AI is temporarily throttled (HTTP 429)."
+                    ai_cfg = get_ai_runtime_config()
+                    error_msg = format_rate_limit_error(ai_cfg["llm"]["provider"], ai_cfg["llm"]["model"])
                 else:
                     raise
 
@@ -780,6 +1128,13 @@ class EmailAutomationService:
 
         return self.get_email_details(email_id)
 
+    def retry_processing(self, email_id: str) -> dict:
+        """
+        Retry AI analysis and RAG processing for an email that was throttled.
+        Delegates directly to reprocess_email for backward compatibility.
+        """
+        return self.reprocess_email(email_id)
+
     # =========================================================
     # Human Approval & Real Microsoft Graph Reply
     # =========================================================
@@ -798,32 +1153,95 @@ class EmailAutomationService:
         if not email:
             raise ValueError(f"Email not found: {email_id}")
 
+        if is_system_notification(email) or email.get("status") == "SYSTEM_NOTIFICATION":
+            raise ValueError(
+                f"Cannot reply to {email_id}: Email is an automated Microsoft 365 Exchange Non-Delivery Report (NDR). "
+                "Outbound replies to system mailer-daemons are prohibited to prevent email bounce loops."
+            )
+
         message_id = email.get("message_id")
         recipient = email.get("sender_email")
 
-        # 1. Attempt Microsoft Graph Reply if message_id is available
-        graph_reply_success = False
-        if message_id:
+        # 1. If message_id is missing on this record, attempt to resolve from DB or Graph inbox
+        if not message_id:
+            print(f"[EmailAutomationService] Record {email_id} has message_id=None. Searching for matching message in DB or Graph...")
+            sender = (email.get("sender_email") or "").strip().lower()
+            subject = (email.get("subject") or "").strip().lower()
+            
+            # Check other DB records with same sender or subject that have a message_id
             try:
-                self.microsoft_email_service.reply_to_email(
-                    message_id=message_id,
-                    reply_text=reply_text.strip(),
-                )
-                graph_reply_success = True
-                # Mark as read now that reply is sent
+                db_emails = self.email_repository.list_emails(limit=50)
+                for cand in db_emails:
+                    cand_sender = (cand.get("sender_email") or "").strip().lower()
+                    cand_sub = (cand.get("subject") or "").strip().lower()
+                    if cand.get("message_id") and (cand_sender == sender or cand_sub == subject):
+                        message_id = cand["message_id"]
+                        print(f"[EmailAutomationService] Found matching message_id={message_id} from DB record {cand.get('email_id')}. Backfilling {email_id}...")
+                        try:
+                            self.email_repository.update_email(email_id, message_id=message_id)
+                        except Exception as be:
+                            print(f"[EmailAutomationService] Failed to backfill message_id: {be}")
+                        break
+            except Exception as dbe:
+                print(f"[EmailAutomationService] DB scan for matching message_id failed: {dbe}")
+
+            # If still not found, check live Graph inbox using get_inbox_messages
+            if not message_id:
                 try:
-                    self.microsoft_email_service.mark_as_read(message_id)
-                except Exception as me:
-                    print(f"Warning: could not mark email as read: {me}")
-            except Exception as ge:
-                print(f"[EmailAutomationService] Microsoft Graph reply exception: {ge}")
-                raise RuntimeError(
-                    f"Microsoft Graph reply dispatch failed: {ge}"
-                )
-        else:
-            # If email was inserted manually without Microsoft Graph message_id
+                    graph_msgs = self.microsoft_email_service.get_inbox_messages(top=50)
+                    for gm in graph_msgs:
+                        gm_id = gm.get("id")
+                        if not gm_id:
+                            continue
+                        gm_sender = (gm.get("sender", {}).get("emailAddress", {}).get("address") or "").strip().lower()
+                        gm_sub = (gm.get("subject") or "").strip().lower()
+
+                        is_sender_match = bool(sender and gm_sender and (sender == gm_sender or sender in gm_sender or gm_sender in sender))
+                        is_subj_match = bool(subject and gm_sub and (subject in gm_sub or gm_sub in subject))
+
+                        # Keyword correlation fallback for ERP/PO/login terms
+                        kw_match = False
+                        if subject and gm_sub:
+                            sub_words = set(w for w in subject.replace("-", " ").replace("?", " ").lower().split() if len(w) > 3)
+                            gm_words = set(w for w in gm_sub.replace("-", " ").replace("?", " ").lower().split() if len(w) > 3)
+                            if len(sub_words.intersection(gm_words)) >= 2:
+                                kw_match = True
+
+                        if is_sender_match or is_subj_match or kw_match:
+                            message_id = gm_id
+                            print(f"[EmailAutomationService] Resolved message_id={message_id[:25]}... from Graph inbox! Backfilling {email_id}...")
+                            try:
+                                self.email_repository.update_email(email_id, message_id=message_id)
+                            except Exception as upe:
+                                print(f"[EmailAutomationService] Failed to persist resolved message_id: {upe}")
+                            break
+                except Exception as gme:
+                    print(f"[EmailAutomationService] Graph inbox scan for matching message_id failed: {gme}")
+
+        if not message_id:
             raise ValueError(
-                "Cannot reply: This email record has no Microsoft Graph message_id."
+                f"Cannot reply: This email record ({email_id}) has no Microsoft Graph message_id "
+                "and no matching message was found in mailbox GauravBhardwaj@GSVAIEnterpriseAI.onmicrosoft.com. "
+                "Ensure the email exists in the Microsoft 365 mailbox."
+            )
+
+        # 2. Attempt Microsoft Graph Reply
+        graph_reply_success = False
+        try:
+            self.microsoft_email_service.reply_to_email(
+                message_id=message_id,
+                reply_text=reply_text.strip(),
+            )
+            graph_reply_success = True
+            # Mark as read now that reply is sent
+            try:
+                self.microsoft_email_service.mark_as_read(message_id)
+            except Exception as me:
+                print(f"Warning: could not mark email as read: {me}")
+        except Exception as ge:
+            print(f"[EmailAutomationService] Microsoft Graph reply exception: {ge}")
+            raise RuntimeError(
+                f"Microsoft Graph reply dispatch failed: {ge}"
             )
 
         # 2. Update Database with Audited Reply
@@ -832,6 +1250,13 @@ class EmailAutomationService:
 
         # Update trace to reflect completed human approval & sent reply
         trace = email.get("trace_data") or []
+        if isinstance(trace, str):
+            try:
+                trace = json.loads(trace)
+            except Exception:
+                trace = []
+        if not isinstance(trace, list):
+            trace = []
         for step in trace:
             if step.get("step") == 13:
                 step["status"] = "completed"
@@ -841,6 +1266,8 @@ class EmailAutomationService:
                 step["status"] = "completed"
                 step["timestamp"] = now_iso
                 step["summary"] = "Threaded reply dispatched via Microsoft Graph"
+                if not isinstance(step.get("details"), dict):
+                    step["details"] = {}
                 step["details"]["status_code"] = "202 Accepted"
             elif step.get("step") == 15:
                 step["status"] = "completed"

@@ -1,186 +1,113 @@
 # pyrefly: ignore [missing-import]
 
+import os
 import time
-import oci
 
-# pyrefly: ignore [missing-import]
-from oci.generative_ai_inference import GenerativeAiInferenceClient
+from dotenv import load_dotenv
+from groq import Groq, APIError, RateLimitError
 
-# pyrefly: ignore [missing-import]
-from oci.generative_ai_inference.models import (
-    ChatDetails,
-    OnDemandServingMode,
-    GenericChatRequest,
-    SystemMessage,
-    UserMessage,
-    TextContent,
-)
+load_dotenv()
 
+MODEL_ID = os.getenv("GROQ_MODEL", "openai/gpt-oss-20b")
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
-# ---------------------------------------------------------
-# OCI Configuration
-# ---------------------------------------------------------
+if not GROQ_API_KEY:
+    raise ValueError("GROQ_API_KEY must be configured in the environment.")
 
-config = oci.config.from_file()
+client = Groq(api_key=GROQ_API_KEY)
 
-COMPARTMENT_ID = config["tenancy"]
+print("=" * 60)
+print("GSVAI GROQ GENERATIVE AI CONFIGURATION")
+print("=" * 60)
+print(f"Groq Model      : {MODEL_ID}")
+print("Groq Endpoint   : https://api.groq.com/openai/v1")
+print("=" * 60)
 
-# Gemini 2.5 Flash
-MODEL_ID = "google.gemini-2.5-flash"
-
-
-# ---------------------------------------------------------
-# OCI Generative AI Client
-# ---------------------------------------------------------
-
-# Disable the OCI SDK's internal retry strategy.
-# Our application-level retry logic below handles HTTP 429.
-client = GenerativeAiInferenceClient(
-    config=config,
-    retry_strategy=oci.retry.NoneRetryStrategy(),
-)
-
-
-# ---------------------------------------------------------
-# OCI Chat with Retry / Exponential Backoff
-# ---------------------------------------------------------
 
 def _chat_with_retry(
-    chat_details: ChatDetails,
-    max_retries: int = 5,
-    initial_delay: int = 2,
+    messages: list[dict],
+    max_completion_tokens: int,
+    temperature: float,
+    reasoning_effort: str = "low",
+    max_retries: int = 3,
 ):
-    """
-    Calls OCI Generative AI with application-level retry
-    handling for HTTP 429 throttling.
+    """Call Groq with conservative 429 retry handling."""
 
-    Retry sequence:
-
-        Attempt 1
-        wait 2 sec
-        Attempt 2
-        wait 4 sec
-        Attempt 3
-        wait 8 sec
-        Attempt 4
-        wait 16 sec
-        Attempt 5
-
-    Only HTTP 429 errors are retried.
-    Other OCI errors are raised immediately.
-    """
-
-    delay = initial_delay
+    retry_delays = [2, 5]
 
     for attempt in range(1, max_retries + 1):
-
         try:
+            print(f"Groq request (attempt {attempt}/{max_retries})")
 
-            print(
-                f"OCI Generative AI request "
-                f"(attempt {attempt}/{max_retries})"
+            response = client.chat.completions.create(
+                model=MODEL_ID,
+                messages=messages,
+                max_completion_tokens=max_completion_tokens,
+                temperature=temperature,
+                reasoning_effort=reasoning_effort,
+                include_reasoning=False,
+                stream=False,
             )
 
-            response = client.chat(
-                chat_details=chat_details
-            )
-
-            print(
-                "OCI Generative AI request successful."
-            )
-
+            print("Groq request successful.")
             return response
 
-        except oci.exceptions.ServiceError as e:
+        except RateLimitError as e:
+            print("Groq returned HTTP 429 rate limit.")
 
-            if e.status == 429:
+            if attempt == max_retries:
+                raise RuntimeError(
+                    "Groq is currently rate limiting requests (HTTP 429). "
+                    "The request was stopped after conservative retries."
+                ) from e
 
-                if attempt == max_retries:
+            retry_after = None
+            try:
+                response = getattr(e, "response", None)
+                headers = getattr(response, "headers", {}) or {}
+                retry_after = headers.get("retry-after")
+            except Exception:
+                pass
 
-                    print(
-                        "OCI Generative AI throttling persists "
-                        "after maximum retries."
-                    )
-
-                    raise
-
-                print(
-                    f"OCI Generative AI returned HTTP 429 "
-                    f"(throttled). Retrying in {delay} seconds..."
-                )
-
-                time.sleep(delay)
-
-                delay *= 2
-
+            if retry_after:
+                try:
+                    delay = max(float(retry_after), 1.0)
+                except (TypeError, ValueError):
+                    delay = retry_delays[attempt - 1]
             else:
+                delay = retry_delays[attempt - 1]
 
-                print(
-                    f"OCI Generative AI request failed "
-                    f"with HTTP {e.status}."
-                )
+            print(f"Waiting {delay:g} seconds before retry...")
+            time.sleep(delay)
 
-                raise
+        except APIError as e:
+            print(f"Groq API request failed: {e}")
+            raise
 
-    raise RuntimeError(
-        "OCI Generative AI request failed after retries."
-    )
+    raise RuntimeError("Groq request failed after retries.")
 
-
-# ---------------------------------------------------------
-# Extract Generic Chat Response
-# ---------------------------------------------------------
 
 def _extract_response_text(response) -> str:
-    """
-    Extracts text from OCI GenericChatResponse.
+    """Extract text from a Groq Chat Completion response."""
 
-    Gemini uses the generic chat response structure:
+    if not response.choices:
+        raise RuntimeError("Groq returned an empty response.")
 
-        chat_response
-            -> choices
-                -> message
-                    -> content
-                        -> text
-    """
+    message = response.choices[0].message
 
-    choices = response.data.chat_response.choices
+    if not message:
+        raise RuntimeError("Groq returned an empty message.")
 
-    if not choices:
-        raise RuntimeError(
-            "OCI Generative AI returned an empty response."
-        )
+    text = message.content
 
-    message = choices[0].message
+    if not text:
+        raise RuntimeError("Groq response contained no text.")
 
-    if not message.content:
-        raise RuntimeError(
-            "OCI Generative AI returned an empty message."
-        )
-
-    text_parts = []
-
-    for content in message.content:
-
-        if hasattr(content, "text") and content.text:
-            text_parts.append(content.text)
-
-    if not text_parts:
-        raise RuntimeError(
-            "OCI Generative AI response contained no text."
-        )
-
-    return "".join(text_parts)
+    return text
 
 
-# ---------------------------------------------------------
-# Generate RAG Answer
-# ---------------------------------------------------------
-
-def generate_answer(
-    question: str,
-    context: str
-) -> str:
+def generate_answer(question: str, context: str) -> str:
+    """Generate a grounded answer using retrieved enterprise context."""
 
     system_prompt = """
 You are GSVAI, an enterprise AI assistant.
@@ -188,22 +115,33 @@ You are GSVAI, an enterprise AI assistant.
 Your task is to answer the user's question using the
 knowledge context retrieved from the enterprise knowledge base.
 
-Rules:
+IMPORTANT GROUNDING RULES:
 
-1. Use the provided knowledge context as the primary source.
+1. Use the provided knowledge context as the primary
+   and authoritative source.
 
-2. Do not invent or assume information that is not present
-   in the context.
+2. Do NOT invent, assume, guess, or infer information
+   that is not supported by the provided context.
 
-3. If the context does not contain enough information to answer
-   the question, say:
+3. If the context does not contain enough information
+   to answer the question, respond exactly with:
 
    "I could not find this information in the knowledge base."
 
-4. Give a clear and concise answer.
+4. Do not use your general world knowledge to fill gaps
+   in the enterprise knowledge base.
 
-5. Do not mention internal implementation details such as
+5. Give a clear and concise answer.
+
+6. If the question cannot be answered from the supplied
+   context, do not attempt to provide an alternative
+   unsupported answer.
+
+7. Do not mention internal implementation details such as
    embeddings, vector distances, or RAG unless the user asks.
+
+8. When the context contains the answer, answer using
+   only the information supported by that context.
 """
 
     user_prompt = f"""
@@ -219,58 +157,24 @@ Answer
 ------
 """
 
-    messages = [
-        SystemMessage(
-            content=[
-                TextContent(
-                    text=system_prompt
-                )
-            ]
-        ),
-        UserMessage(
-            content=[
-                TextContent(
-                    text=user_prompt
-                )
-            ]
-        ),
-    ]
-
-    chat_request = GenericChatRequest(
-        api_format="GENERIC",
-        messages=messages,
-        max_tokens=400,
-        temperature=0.2,
-        reasoning_effort="LOW",
-    )
-
-    chat_details = ChatDetails(
-        compartment_id=COMPARTMENT_ID,
-        serving_mode=OnDemandServingMode(
-            model_id=MODEL_ID
-        ),
-        chat_request=chat_request,
-    )
-
     response = _chat_with_retry(
-        chat_details=chat_details
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ],
+        max_completion_tokens=400,
+        temperature=0.2,
+        reasoning_effort="low",
     )
 
     return _extract_response_text(response)
 
 
-# ---------------------------------------------------------
-# Generate General AI Answer
-# No RAG / General Query
-# ---------------------------------------------------------
-
-def generate_general_answer(
-    question: str
-) -> str:
+def generate_general_answer(question: str) -> str:
+    """Generate a general AI answer without RAG context."""
 
     system_prompt = """
-You are GSVAI, a premier enterprise AI assistant powered by
-OCI Generative AI.
+You are GSVAI, a premier enterprise AI assistant powered by Groq.
 
 Your task is to answer the user's question accurately,
 concisely, and professionally.
@@ -279,13 +183,16 @@ Rules:
 
 1. Provide a direct, helpful, and well-structured answer.
 
-2. If explaining technical concepts, architecture, or business
-   processes, use clear points.
+2. If explaining technical concepts, architecture,
+   or business processes, use clear points.
 
 3. Maintain a professional enterprise tone.
 
-4. Do NOT mention that you searched a knowledge base or that
-   information was missing unless relevant.
+4. Do not mention that you searched a knowledge base
+   or that information was missing unless relevant.
+
+5. Do not invent specific enterprise information
+   that has not been provided.
 """
 
     user_prompt = f"""
@@ -297,41 +204,14 @@ Answer
 ------
 """
 
-    messages = [
-        SystemMessage(
-            content=[
-                TextContent(
-                    text=system_prompt
-                )
-            ]
-        ),
-        UserMessage(
-            content=[
-                TextContent(
-                    text=user_prompt
-                )
-            ]
-        ),
-    ]
-
-    chat_request = GenericChatRequest(
-        api_format="GENERIC",
-        messages=messages,
-        max_tokens=450,
-        temperature=0.3,
-        reasoning_effort="LOW",
-    )
-
-    chat_details = ChatDetails(
-        compartment_id=COMPARTMENT_ID,
-        serving_mode=OnDemandServingMode(
-            model_id=MODEL_ID
-        ),
-        chat_request=chat_request,
-    )
-
     response = _chat_with_retry(
-        chat_details=chat_details
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ],
+        max_completion_tokens=450,
+        temperature=0.3,
+        reasoning_effort="low",
     )
 
     return _extract_response_text(response)

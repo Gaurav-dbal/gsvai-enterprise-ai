@@ -9,6 +9,7 @@ import json
 from datetime import datetime, timezone
 from typing import Dict, Any, List, Optional
 from services.oracle_db_service import get_connection
+from services.ai_runtime_config import get_ai_runtime_config
 
 
 def format_relative_time(dt: Optional[datetime]) -> str:
@@ -262,8 +263,8 @@ def get_dashboard_overview(period: str = "today") -> Dict[str, Any]:
                 "invoices_in_review_source": "GSVAI_INVOICES (Status: REVIEW_REQUIRED)",
                 "ai_queries_count": len(ai_query_logs),
                 "ai_queries_source": "GSVAI_AUDIT_LOGS (Action: DATA_ASSISTANT_QUERY)",
-                "ai_model_name": "Cohere Command A",
-                "ai_model_id": "cohere.command-a-03-2025",
+                "ai_model_name": f"{get_ai_runtime_config()['llm']['provider']} ({get_ai_runtime_config()['llm']['model']})",
+                "ai_model_id": get_ai_runtime_config()['llm']['model'],
                 "avg_latency_ms": avg_latency_ms,
                 "min_latency_ms": min_latency_ms,
                 "max_latency_ms": max_latency_ms,
@@ -298,8 +299,8 @@ def get_dashboard_overview(period: str = "today") -> Dict[str, Any]:
                 "invoices_in_review_source": "Database Unavailable",
                 "ai_queries_count": 0,
                 "ai_queries_source": "Database Unavailable",
-                "ai_model_name": "Cohere Command A",
-                "ai_model_id": "cohere.command-a-03-2025",
+                "ai_model_name": f"{get_ai_runtime_config()['llm']['provider']} ({get_ai_runtime_config()['llm']['model']})",
+                "ai_model_id": get_ai_runtime_config()['llm']['model'],
                 "avg_latency_ms": 0.0,
                 "min_latency_ms": 0.0,
                 "max_latency_ms": 0.0,

@@ -23,7 +23,7 @@ export const NAV_ITEMS = [
   { id: "settings", label: "Settings", icon: Settings, isLive: false },
 ];
 
-export function Sidebar({ activeTab, setActiveTab, isCollapsed, setIsCollapsed, backendStatus }) {
+export function Sidebar({ activeTab, setActiveTab, isCollapsed, setIsCollapsed, backendStatus, backendData }) {
   return (
     <aside className={`sidebar ${isCollapsed ? "collapsed" : ""}`}>
       {/* Sidebar Header / Brand */}
@@ -100,14 +100,20 @@ export function Sidebar({ activeTab, setActiveTab, isCollapsed, setIsCollapsed, 
         })}
       </nav>
 
-      {/* Sidebar Footer with OCI POC Status info */}
+      {/* Sidebar Footer with Live Active AI Runtime */}
       {!isCollapsed && (
         <div className="sidebar-footer">
           <div className="oci-badge-card">
             <div className={`oci-badge-icon ${backendStatus === "connected" ? "" : "disconnected"}`} />
             <div className="oci-badge-info">
-              <div className="oci-badge-title">OCI GenAI On-Demand</div>
-              <div className="oci-badge-sub">Cohere Command A • ap-hyderabad-1</div>
+              <div className="oci-badge-title">
+                {backendData?.ai_runtime?.llm?.provider
+                  ? `${backendData.ai_runtime.llm.provider} Enterprise AI`
+                  : "Enterprise AI Active"}
+              </div>
+              <div className="oci-badge-sub" title={backendData?.ai_runtime?.llm?.model || "Active LLM"}>
+                {backendData?.ai_runtime?.llm?.model || "openai/gpt-oss-20b"}
+              </div>
             </div>
           </div>
         </div>

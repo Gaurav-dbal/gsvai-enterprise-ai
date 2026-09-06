@@ -33,6 +33,7 @@ import {
   processNewEmails,
   fetchEmailDetails,
   retryEmailProcessing,
+  reprocessEmail,
   approveAndSendEmailReply,
   rejectEmail,
 } from "../../../api/client";
@@ -271,12 +272,12 @@ export function EmailAutomationView() {
     }
   };
 
-  // Retry processing for throttled or failed email
-  const handleRetryProcessing = async () => {
+  // Reprocess AI analysis and routing for selected email
+  const handleReprocessEmail = async () => {
     if (!selectedEmail) return;
     setIsRetrying(true);
     try {
-      const updated = await retryEmailProcessing(selectedEmail.email_id);
+      const updated = await reprocessEmail(selectedEmail.email_id);
       setSelectedEmail(updated);
       setSelectedEmailDetails(updated);
       if (updated.suggested_reply) {
@@ -286,17 +287,22 @@ export function EmailAutomationView() {
       await loadSystemInfo();
       setFeedbackMessage({
         type: "success",
-        text: "Email reprocessing completed successfully.",
+        text: "AI analysis and pipeline reprocessed successfully.",
       });
     } catch (err) {
       setFeedbackMessage({
         type: "error",
-        text: `Retry failed: ${err.message}`,
+        text: `Reprocess failed: ${err.message}`,
       });
     } finally {
       setIsRetrying(false);
       setTimeout(() => setFeedbackMessage(null), 4000);
     }
+  };
+
+  // Retry processing for throttled or failed email
+  const handleRetryProcessing = async () => {
+    return handleReprocessEmail();
   };
 
   // Execute Human Approval: Dispatch reply via Microsoft Graph
@@ -359,7 +365,8 @@ export function EmailAutomationView() {
   const processingTrace = currentDetails?.trace_data || [];
   const isThrottled = currentDetails?.status === "AI_THROTTLED" || Boolean(currentDetails?.error_message?.includes("429"));
   const isReplied = currentDetails?.status === "REPLIED";
-  const isAwaitingApproval = currentDetails?.status === "AWAITING_APPROVAL" || (!isReplied && !isThrottled && currentDetails?.suggested_reply);
+  const isSystemNotification = currentDetails?.status === "SYSTEM_NOTIFICATION" || currentDetails?.routed_agent === "system_notification";
+  const isAwaitingApproval = !isSystemNotification && (currentDetails?.status === "AWAITING_APPROVAL" || (!isReplied && !isThrottled && currentDetails?.suggested_reply));
 
   return (
     <div className="animate-fade-in" style={{ display: "flex", flexDirection: "column", gap: "18px" }}>
@@ -418,20 +425,22 @@ export function EmailAutomationView() {
 
           <span style={{ color: "var(--border-subtle)" }}>|</span>
 
-          {/* OCI GenAI Status */}
+          {/* LLM Status */}
           <div style={{ display: "flex", alignItems: "center", gap: "5px" }}>
             <span
               style={{
                 width: "7px",
                 height: "7px",
                 borderRadius: "50%",
-                backgroundColor: systemStatus?.oci_generative_ai?.status === "throttled" || isThrottled
+                backgroundColor: systemStatus?.llm?.status === "throttled" || systemStatus?.oci_generative_ai?.status === "throttled" || isThrottled
                   ? "var(--color-warning)"
                   : "var(--color-success)",
               }}
             />
-            <span style={{ fontWeight: "500", color: "var(--text-primary)" }}>OCI Generative AI:</span>
-            {systemStatus?.oci_generative_ai?.status === "throttled" || isThrottled ? (
+            <span style={{ fontWeight: "500", color: "var(--text-primary)" }}>
+              {systemStatus?.llm?.provider || modelsConfig?.llm_provider || "LLM Service"}:
+            </span>
+            {systemStatus?.llm?.status === "throttled" || systemStatus?.oci_generative_ai?.status === "throttled" || isThrottled ? (
               <span
                 style={{
                   color: "var(--color-warning-text)",
@@ -540,7 +549,7 @@ export function EmailAutomationView() {
             </span>
             <ArrowRight size={13} style={{ color: "var(--text-muted)" }} />
             <span className="badge" style={{ background: "#FFFBEB", color: "#B45309", border: "1px solid #FDE68A" }}>
-              8. OCI LLM (Gemini 2.5 Flash)
+              {`8. ${modelsConfig?.llm_provider || "Groq"} (${modelsConfig?.llm_model || "openai/gpt-oss-20b"})`}
             </span>
             <ArrowRight size={13} style={{ color: "var(--text-muted)" }} />
             <span className="badge" style={{ background: "#FEF2F2", color: "#B91C1C", border: "2px solid #F87171", fontWeight: "700" }}>
@@ -716,8 +725,9 @@ export function EmailAutomationView() {
                   ? new Date(email.received_date).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
                   : "Recent";
 
-                const emailPriority = email.analysis?.priority || "Medium";
-                const emailCategory = email.analysis?.email_type || (email.status === "UNREAD" ? "New Mail" : "General");
+                const isItemNDR = email.status === "SYSTEM_NOTIFICATION" || email.routed_agent === "system_notification";
+                const emailPriority = isItemNDR ? "Low" : (email.analysis?.priority || "Medium");
+                const emailCategory = isItemNDR ? "System Notification" : (email.analysis?.email_type || (email.status === "UNREAD" ? "New Mail" : "General"));
 
                 return (
                   <div
@@ -882,28 +892,34 @@ export function EmailAutomationView() {
                     <div>
                       <span style={{ color: "var(--text-muted)", display: "block", fontSize: "11px" }}>Email Type:</span>
                       <strong style={{ color: "var(--text-primary)", textTransform: "capitalize" }}>
-                        {analysis.email_type ? analysis.email_type.replace("_", " ") : "Technical Issue"}
+                        {isSystemNotification
+                          ? "System Notification / NDR"
+                          : (analysis.email_type ? analysis.email_type.replace("_", " ") : "Technical Issue")}
                       </strong>
                     </div>
 
                     <div>
                       <span style={{ color: "var(--text-muted)", display: "block", fontSize: "11px" }}>Priority:</span>
-                      <strong style={{ color: analysis.priority === "critical" || analysis.priority === "high" ? "var(--color-danger-text)" : "var(--text-primary)", textTransform: "capitalize" }}>
-                        {analysis.priority || "Low"}
+                      <strong style={{ color: isSystemNotification ? "var(--text-secondary)" : (analysis.priority === "critical" || analysis.priority === "high" ? "var(--color-danger-text)" : "var(--text-primary)"), textTransform: "capitalize" }}>
+                        {isSystemNotification ? "Low (System)" : (analysis.priority || "Low")}
                       </strong>
                     </div>
 
                     <div>
                       <span style={{ color: "var(--text-muted)", display: "block", fontSize: "11px" }}>Recommended Action:</span>
                       <strong style={{ color: "var(--color-primary)", textTransform: "capitalize" }}>
-                        {analysis.recommended_action ? analysis.recommended_action.replace("route_to_", "").replace(/_/g, " ") : "Route To RAG Agent"}
+                        {isSystemNotification
+                          ? "Ignore System Notification"
+                          : (analysis.recommended_action ? analysis.recommended_action.replace("route_to_", "").replace(/_/g, " ") : "Route To RAG Agent")}
                       </strong>
                     </div>
 
                     <div>
                       <span style={{ color: "var(--text-muted)", display: "block", fontSize: "11px" }}>Assigned Agent:</span>
                       <strong style={{ color: "var(--text-primary)", textTransform: "capitalize" }}>
-                        {currentDetails?.routed_agent ? currentDetails.routed_agent.replace(/_/g, " ") : "RAG Agent"}
+                        {isSystemNotification
+                          ? "System Notification Guard"
+                          : (currentDetails?.routed_agent ? currentDetails.routed_agent.replace(/_/g, " ") : "RAG Agent")}
                       </strong>
                     </div>
                   </div>
@@ -1112,7 +1128,7 @@ export function EmailAutomationView() {
                       </p>
                     </div>
                     <span className="badge" style={{ backgroundColor: "#EFF6FF", color: "#1D4ED8", border: "1px solid #BFDBFE" }}>
-                      cohere.embed-v4.0
+                      {modelsConfig?.embedding_model || "BAAI/bge-large-en-v1.5"}
                     </span>
                   </div>
 
@@ -1165,166 +1181,234 @@ export function EmailAutomationView() {
               >
                 <div>
                   <span style={{ color: "var(--text-muted)", display: "block" }}>Embedding Model</span>
-                  <strong style={{ color: "var(--text-primary)" }}>{modelsConfig?.embedding_model || "cohere.embed-v4.0"}</strong>
+                  <strong style={{ color: "var(--text-primary)" }}>{modelsConfig?.embedding_model || "BAAI/bge-large-en-v1.5"}</strong>
                 </div>
                 <div>
                   <span style={{ color: "var(--text-muted)", display: "block" }}>LLM</span>
-                  <strong style={{ color: "var(--text-primary)" }}>{modelsConfig?.llm_model || "google.gemini-2.5-flash"}</strong>
+                  <strong style={{ color: "var(--text-primary)" }}>{modelsConfig?.llm_model || "openai/gpt-oss-20b"}</strong>
                 </div>
-                <div>
-                  <span style={{ color: "var(--text-muted)", display: "block" }}>Region</span>
-                  <strong style={{ color: "var(--text-primary)" }}>{modelsConfig?.region || "ap-hyderabad-1"}</strong>
-                </div>
+                {modelsConfig?.region && (
+                  <div>
+                    <span style={{ color: "var(--text-muted)", display: "block" }}>Region</span>
+                    <strong style={{ color: "var(--text-primary)" }}>{modelsConfig.region}</strong>
+                  </div>
+                )}
                 <div>
                   <span style={{ color: "var(--text-muted)", display: "block" }}>Vector Database</span>
                   <strong style={{ color: "var(--text-primary)" }}>{modelsConfig?.vector_database || "Oracle AI Vector Search"}</strong>
                 </div>
                 <div>
                   <span style={{ color: "var(--text-muted)", display: "block" }}>LLM Provider</span>
-                  <strong style={{ color: "var(--text-primary)" }}>{modelsConfig?.llm_provider || "OCI Generative AI"}</strong>
+                  <strong style={{ color: "var(--text-primary)" }}>{modelsConfig?.llm_provider || "Groq"}</strong>
                 </div>
               </div>
 
               {/* 3.5 AI Suggested Response & Human Approval Section */}
-              <div className="card" style={{ border: isReplied ? "1px solid var(--color-success-border)" : "1px solid var(--color-primary-border)" }}>
-                <div className="card-header" style={{ paddingBottom: "10px" }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                    <Edit3 size={16} style={{ color: isReplied ? "var(--color-success)" : "var(--color-primary)" }} />
-                    <h3 className="card-title">
-                      {isReplied ? "Dispatched Email Reply (Archived)" : "AI Suggested Response (Editable Draft)"}
-                    </h3>
-                  </div>
-
-                  <div style={{ display: "flex", gap: "6px" }}>
-                    <span className="badge badge-live">Context-Aware</span>
-                    {ragSources && ragSources.length > 0 && (
-                      <span className="badge" style={{ backgroundColor: "#F0FDF4", color: "#166534", border: "1px solid #DCFCE7" }}>
-                        RAG Grounded
-                      </span>
-                    )}
-                    {isReplied && (
-                      <span className="badge" style={{ backgroundColor: "#F0FDF4", color: "#166534", border: "1px solid #DCFCE7" }}>
-                        ✓ Replied via Graph
-                      </span>
-                    )}
-                  </div>
-                </div>
-
-                {/* Throttled Alert Banner if OCI is throttling */}
-                {isThrottled && (
-                  <div
-                    style={{
-                      padding: "10px 14px",
-                      marginBottom: "10px",
-                      backgroundColor: "var(--color-warning-bg)",
-                      border: "1px solid var(--color-warning-border)",
-                      borderRadius: "var(--radius-sm)",
-                      fontSize: "12.5px",
-                      color: "var(--color-warning-text)",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "space-between",
-                    }}
-                  >
-                    <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                      <AlertTriangle size={16} />
-                      <span>
-                        AI processing could not be completed because OCI Generative AI is temporarily throttled (HTTP 429).
-                        The email has been safely preserved in Oracle Database.
-                      </span>
-                    </div>
-                    <button
-                      className="btn btn-secondary"
-                      onClick={handleRetryProcessing}
-                      disabled={isRetrying}
-                      style={{ fontSize: "11.5px", padding: "4px 10px" }}
-                    >
-                      {isRetrying ? "Retrying..." : "Retry Processing"}
-                    </button>
-                  </div>
-                )}
-
-                {/* Reply Editor (Editable Textarea) */}
-                <textarea
-                  style={{
-                    width: "100%",
-                    minHeight: "130px",
-                    fontSize: "13px",
-                    lineHeight: "1.55",
-                    padding: "10px 12px",
-                    borderRadius: "var(--radius-sm)",
-                    border: "1px solid var(--border-subtle)",
-                    backgroundColor: isReplied ? "var(--bg-surface-subtle)" : "var(--bg-surface)",
-                    color: "var(--text-primary)",
-                    fontFamily: "inherit",
-                    resize: "vertical",
-                  }}
-                  value={draftReply}
-                  onChange={(e) => setDraftReply(e.target.value)}
-                  disabled={isReplied}
-                  placeholder={
-                    isThrottled
-                      ? "Response draft pending OCI availability. You may compose a manual reply or click 'Retry Processing' once throttled state clears."
-                      : "AI generated draft will appear here..."
-                  }
-                />
-
-                {/* Action Controls & Mandatory Human-in-the-Loop Gateway */}
+              {isSystemNotification ? (
                 <div
+                  className="card"
                   style={{
-                    display: "flex",
-                    justifyContent: "space-between",
-                    alignItems: "center",
-                    flexWrap: "wrap",
-                    gap: "10px",
-                    marginTop: "12px",
+                    border: "1px solid var(--border-subtle)",
+                    backgroundColor: "var(--bg-surface)",
                   }}
                 >
-                  <span style={{ fontSize: "12px", color: "var(--text-secondary)" }}>
-                    {isReplied ? (
-                      <span style={{ color: "var(--color-success-text)", fontWeight: "600", display: "flex", alignItems: "center", gap: "4px" }}>
-                        <CheckCircle2 size={14} /> Reply sent to {selectedEmail.sender_email} at {selectedEmail.reply_sent_at ? new Date(selectedEmail.reply_sent_at).toLocaleTimeString() : "Recent"}
-                      </span>
-                    ) : (
-                      <span>
-                        Status: <strong style={{ color: isAwaitingApproval ? "var(--color-warning-text)" : "var(--text-primary)" }}>
-                          {selectedEmail.status === "AWAITING_APPROVAL" ? "AWAITING HUMAN APPROVAL" : selectedEmail.status}
-                        </strong> • Mandatory human review required before dispatch
-                      </span>
-                    )}
-                  </span>
+                  <div className="card-header" style={{ paddingBottom: "10px" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                      <ShieldCheck size={16} style={{ color: "var(--color-primary)" }} />
+                      <h3 className="card-title">Microsoft 365 System Delivery Notification (NDR)</h3>
+                    </div>
+                    <span className="badge" style={{ backgroundColor: "var(--bg-surface-subtle)", color: "var(--text-secondary)", border: "1px solid var(--border-subtle)" }}>
+                      Automated Reply Bypassed
+                    </span>
+                  </div>
 
-                  <div style={{ display: "flex", gap: "8px" }}>
-                    {!isReplied && (
-                      <>
-                        <button
-                          className="btn btn-secondary"
-                          onClick={handleReject}
-                          style={{ fontSize: "12px", color: "var(--text-secondary)" }}
-                        >
-                          Send to Human Review
-                        </button>
-
-                        <button
-                          className="btn btn-primary"
-                          onClick={() => setShowConfirmModal(true)}
-                          disabled={!draftReply.trim() || isApproving}
-                          style={{
-                            display: "flex",
-                            alignItems: "center",
-                            gap: "6px",
-                            backgroundColor: "var(--color-primary)",
-                            fontWeight: "600",
-                          }}
-                        >
-                          <Send size={14} />
-                          Approve & Send Reply
-                        </button>
-                      </>
-                    )}
+                  <div style={{ display: "flex", flexDirection: "column", gap: "10px", fontSize: "12.5px" }}>
+                    <p style={{ margin: 0, color: "var(--text-secondary)", lineHeight: "1.5" }}>
+                      This message was identified as an automated <strong>Exchange Non-Delivery Report (NDR)</strong> or delivery failure notice from Microsoft 365.
+                    </p>
+                    <div
+                      style={{
+                        padding: "12px 14px",
+                        backgroundColor: "var(--bg-surface-subtle)",
+                        border: "1px solid var(--border-subtle)",
+                        borderRadius: "var(--radius-sm)",
+                        color: "var(--text-primary)",
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: "6px",
+                      }}
+                    >
+                      <span style={{ fontWeight: "600", color: "var(--color-primary)", display: "flex", alignItems: "center", gap: "6px" }}>
+                        <Info size={14} /> Deterministic Safety Policy:
+                      </span>
+                      <span style={{ color: "var(--text-secondary)", fontSize: "12px", lineHeight: "1.5" }}>
+                        Outbound replies to system mailer-daemons and NDRs are prohibited to eliminate the risk of automated email bounce loops.
+                        AI LLM analysis and autonomous business agents are skipped, and the event is persisted in Oracle Autonomous Database for telemetry and compliance audit.
+                      </span>
+                    </div>
+                    <div style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "11.5px", color: "var(--text-muted)", marginTop: "4px" }}>
+                      <CheckCircle2 size={13} style={{ color: "var(--color-success)" }} />
+                      <span>Status: <strong>SYSTEM_NOTIFICATION</strong> • No human approval or action required.</span>
+                    </div>
                   </div>
                 </div>
-              </div>
+              ) : (
+                <div className="card" style={{ border: isReplied ? "1px solid var(--color-success-border)" : "1px solid var(--color-primary-border)" }}>
+                  <div className="card-header" style={{ paddingBottom: "10px" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                      <Edit3 size={16} style={{ color: isReplied ? "var(--color-success)" : "var(--color-primary)" }} />
+                      <h3 className="card-title">
+                        {isReplied ? "Dispatched Email Reply (Archived)" : "AI Suggested Response (Editable Draft)"}
+                      </h3>
+                    </div>
+
+                    <div style={{ display: "flex", gap: "6px" }}>
+                      <span className="badge badge-live">Context-Aware</span>
+                      {ragSources && ragSources.length > 0 && (
+                        <span className="badge" style={{ backgroundColor: "#F0FDF4", color: "#166534", border: "1px solid #DCFCE7" }}>
+                          RAG Grounded
+                        </span>
+                      )}
+                      {isReplied && (
+                        <span className="badge" style={{ backgroundColor: "#F0FDF4", color: "#166534", border: "1px solid #DCFCE7" }}>
+                          ✓ Replied via Graph
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Throttled Alert Banner if LLM is rate limited */}
+                  {isThrottled && (
+                    <div
+                      style={{
+                        padding: "10px 14px",
+                        marginBottom: "10px",
+                        backgroundColor: "var(--color-warning-bg)",
+                        border: "1px solid var(--color-warning-border)",
+                        borderRadius: "var(--radius-sm)",
+                        fontSize: "12.5px",
+                        color: "var(--color-warning-text)",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                      }}
+                    >
+                      <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                        <AlertTriangle size={16} />
+                        <span>
+                          {selectedEmail?.error_message ||
+                            `AI processing rate limited (HTTP 429). The email is safely preserved in Oracle Database.`}
+                        </span>
+                      </div>
+                      <button
+                        className="btn btn-secondary"
+                        onClick={handleReprocessEmail}
+                        disabled={isRetrying}
+                        style={{ fontSize: "11.5px", padding: "4px 10px" }}
+                      >
+                        {isRetrying ? "Reprocessing..." : "Reprocess AI"}
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Reply Editor (Editable Textarea) */}
+                  <textarea
+                    style={{
+                      width: "100%",
+                      minHeight: "130px",
+                      fontSize: "13px",
+                      lineHeight: "1.55",
+                      padding: "10px 12px",
+                      borderRadius: "var(--radius-sm)",
+                      border: "1px solid var(--border-subtle)",
+                      backgroundColor: isReplied ? "var(--bg-surface-subtle)" : "var(--bg-surface)",
+                      color: "var(--text-primary)",
+                      fontFamily: "inherit",
+                      resize: "vertical",
+                    }}
+                    value={draftReply}
+                    onChange={(e) => setDraftReply(e.target.value)}
+                    disabled={isReplied}
+                    placeholder={
+                      isThrottled
+                        ? "Response draft pending AI availability. You may compose a manual reply or click 'Reprocess AI' once rate limit clears."
+                        : "AI generated draft will appear here..."
+                    }
+                  />
+
+                  {/* Action Controls & Mandatory Human-in-the-Loop Gateway */}
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                      flexWrap: "wrap",
+                      gap: "10px",
+                      marginTop: "12px",
+                    }}
+                  >
+                    <span style={{ fontSize: "12px", color: "var(--text-secondary)" }}>
+                      {isReplied ? (
+                        <span style={{ color: "var(--color-success-text)", fontWeight: "600", display: "flex", alignItems: "center", gap: "4px" }}>
+                          <CheckCircle2 size={14} /> Reply sent to {selectedEmail.sender_email} at {selectedEmail.reply_sent_at ? new Date(selectedEmail.reply_sent_at).toLocaleTimeString() : "Recent"}
+                        </span>
+                      ) : (
+                        <span>
+                          Status: <strong style={{ color: isAwaitingApproval ? "var(--color-warning-text)" : "var(--text-primary)" }}>
+                            {selectedEmail.status === "AWAITING_APPROVAL" ? "AWAITING HUMAN APPROVAL" : selectedEmail.status}
+                          </strong> • Mandatory human review required before dispatch
+                        </span>
+                      )}
+                    </span>
+
+                    <div style={{ display: "flex", gap: "8px" }}>
+                      {!isReplied && (
+                        <>
+                          <button
+                            className="btn btn-secondary"
+                            onClick={handleReprocessEmail}
+                            disabled={isRetrying}
+                            style={{
+                              fontSize: "12px",
+                              display: "flex",
+                              alignItems: "center",
+                              gap: "5px",
+                            }}
+                            title="Re-run AI classification, RAG vector search, and draft generation"
+                          >
+                            <RefreshCw size={13} className={isRetrying ? "animate-spin" : ""} />
+                            {isRetrying ? "Reprocessing..." : "Reprocess AI"}
+                          </button>
+
+                          <button
+                            className="btn btn-secondary"
+                            onClick={handleReject}
+                            style={{ fontSize: "12px", color: "var(--text-secondary)" }}
+                          >
+                            Send to Human Review
+                          </button>
+
+                          <button
+                            className="btn btn-primary"
+                            onClick={() => setShowConfirmModal(true)}
+                            disabled={!draftReply.trim() || isApproving}
+                            style={{
+                              display: "flex",
+                              alignItems: "center",
+                              gap: "6px",
+                              backgroundColor: "var(--color-primary)",
+                              fontWeight: "600",
+                            }}
+                          >
+                            <Send size={14} />
+                            Approve & Send Reply
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
             </>
           ) : (
             <div className="card" style={{ textAlign: "center", padding: "80px 20px", color: "var(--text-muted)" }}>

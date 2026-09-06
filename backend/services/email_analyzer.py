@@ -1,12 +1,17 @@
 import json
 import re
 
-from services.oci_llm_service import generate_answer
+from services.oci_llm_service import generate_answer, generate_general_answer
+from services.ai_runtime_config import format_rate_limit_error, get_ai_runtime_config
 
 
-class OCIThrottledException(Exception):
-    """Raised when OCI Generative AI is temporarily throttled with HTTP 429."""
+class AIRateLimitException(Exception):
+    """Raised when active LLM provider is temporarily throttled with HTTP 429."""
     pass
+
+
+# Backward-compatible alias for existing callers
+OCIThrottledException = AIRateLimitException
 
 
 EMAIL_ANALYSIS_PROMPT = """
@@ -33,12 +38,12 @@ Your tasks are:
 
 3. Extract relevant information from the email.
 
-4. Recommend the next action:
-   - route_to_invoice_agent
-   - route_to_rag_agent
-   - route_to_data_agent
-   - route_to_human_review
-   - no_action
+4. Recommend the next action based on these guidelines:
+   - route_to_invoice_agent: Use for invoices, purchase orders, billing, payments, receipts, and vendor finance queries.
+   - route_to_rag_agent: Use for technical issues, login/access errors, system troubleshooting, enterprise FAQs, customer support, HR, and general inquiries.
+   - route_to_data_agent: Use specifically for database questions, SQL queries, business metrics, revenue reports, and table data requests.
+   - route_to_human_review: Use for legal notices, sensitive executive complaints, or matters strictly requiring direct human handling without an automated draft.
+   - no_action: Use only for spam or empty automated marketing messages.
 
 5. Provide a short reasoning summary.
 
@@ -121,21 +126,23 @@ def analyze_email(email: dict) -> dict:
     )
 
     try:
-        response = generate_answer(
-            question=prompt,
-            context=""
+        response = generate_general_answer(
+            question=prompt
         )
     except Exception as exc:
         err_str = str(exc).lower()
-        if "429" in err_str or "throttl" in err_str or "too many requests" in err_str:
-            raise OCIThrottledException(
-                "OCI Generative AI is temporarily throttled (HTTP 429). Request preserved for retry."
+        if "429" in err_str or "throttl" in err_str or "too many requests" in err_str or "rate limit" in err_str:
+            err_msg = format_rate_limit_error()
+            raise AIRateLimitException(
+                f"{err_msg} Request preserved for retry."
             ) from exc
         raise
 
+    active_provider = get_ai_runtime_config()["llm"]["provider"]
+
     if not response:
         raise RuntimeError(
-            "OCI LLM returned an empty response."
+            f"{active_provider} returned an empty response."
         )
 
     response = response.strip()
@@ -155,7 +162,7 @@ def analyze_email(email: dict) -> dict:
         analysis = json.loads(response)
     except json.JSONDecodeError as exc:
         raise RuntimeError(
-            f"OCI LLM returned invalid JSON: {response}"
+            f"{active_provider} returned invalid JSON: {response}"
         ) from exc
 
     return analysis

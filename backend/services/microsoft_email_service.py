@@ -1,5 +1,6 @@
 import os
 import requests
+# pyrefly: ignore [missing-import]
 import msal
 
 
@@ -279,6 +280,19 @@ class MicrosoftEmailService:
         return response.json().get("value", [])
 
     # ========================================================
+    # Fetch / Get Inbox Messages (Aliases)
+    # ========================================================
+
+    def fetch_inbox_messages(
+        self,
+        top: int = 25,
+    ):
+        """
+        Retrieve messages from the Inbox (standard alias for get_inbox_messages).
+        """
+        return self.get_inbox_messages(top=top)
+
+    # ========================================================
     # Mark Email as Read
     # ========================================================
 
@@ -324,8 +338,9 @@ class MicrosoftEmailService:
         reply_text: str,
     ):
         """
-        Reply to the original email.
-        This preserves the email conversation/thread.
+        Reply to the original email via Microsoft Graph API v1.0.
+        Uses standard Graph POST /me/messages/{id}/reply with comment payload,
+        which threads directly into the original message thread.
         """
         url = (
             f"{GRAPH_BASE_URL}"
@@ -333,14 +348,10 @@ class MicrosoftEmailService:
         )
 
         payload = {
-            "message": {
-                "body": {
-                    "contentType": "Text",
-                    "content": reply_text,
-                }
-            }
+            "comment": reply_text.strip(),
         }
 
+        print(f"[MicrosoftEmailService] Sending reply to Graph message {message_id[:25]}...")
         response = requests.post(
             url,
             headers=self._headers(),
@@ -348,11 +359,17 @@ class MicrosoftEmailService:
             timeout=30,
         )
 
+        print(f"[MicrosoftEmailService] Graph reply response: HTTP {response.status_code}")
         if response.status_code not in (200, 202):
+            err_details = response.text
+            try:
+                err_json = response.json()
+                err_details = err_json.get("error", {}).get("message", response.text)
+            except Exception:
+                pass
+            print(f"[MicrosoftEmailService] Graph reply error: HTTP {response.status_code} - {err_details}")
             raise RuntimeError(
-                f"Failed to reply to email: "
-                f"{response.status_code} "
-                f"{response.text}"
+                f"Microsoft Graph reply failed (HTTP {response.status_code}): {err_details}"
             )
 
         return True

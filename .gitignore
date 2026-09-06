@@ -2,6 +2,7 @@
 .env
 .env.*
 !.env.example
+backend/.env
 
 # Oracle Wallet / Certificates
 backend/wallet/
@@ -28,10 +29,17 @@ node_modules/
 frontend/node_modules/
 frontend/dist/
 frontend/dist-ssr/
+dist/
+dist-ssr/
 
 # Logs
 *.log
 logs/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
 
 # IDE / OS
 .vscode/*
@@ -42,72 +50,29 @@ logs/
 *.user
 *.userosscache
 *.sln
+*.ntvs*
+*.njsproj
+*.sw?
 
 # Test / Coverage
 .pytest_cache/
 .coverage
-htmlcov/
 .coverage.*
+htmlcov/
 
 # Build / Temporary
 build/
-dist/
 *.tmp
 *.temp
-EOFcat > .gitignore <<'EOF'
-# Environment / Secrets
-.env
-.env.*
-!.env.example
+*.local
 
-# Oracle Wallet / Certificates
-backend/wallet/
-*.sso
-*.p12
-*.pem
-*.jks
-*.key
+# Local backups and troubleshooting artifacts
+backend/agents/invoice_agent_backup.py
+backend/services/oci_llm_service_oci_backup.py
+backend/test_graph_sendmail.py
+backend/test_throtting_error.py
+inbox_output.json
+openapi.json
 
-# Microsoft Authentication
-backend/.msal_token_cache.bin
-
-# Python
-.venv/
-venv/
-env/
-__pycache__/
-**/__pycache__/
-*.py[cod]
-*$py.class
-
-# Node / React
-node_modules/
-frontend/node_modules/
-frontend/dist/
-frontend/dist-ssr/
-
-# Logs
-*.log
-logs/
-
-# IDE / OS
-.vscode/*
-!.vscode/extensions.json
-.idea/
-.DS_Store
-*.suo
-*.user
-*.userosscache
-*.sln
-
-# Test / Coverage
-.pytest_cache/
-.coverage
-htmlcov/
-.coverage.*
-
-# Build / Temporary
-build/
-dist/
-*.tmp
-*.temp
+# Local SSH / secret keys
+backend/Keys/

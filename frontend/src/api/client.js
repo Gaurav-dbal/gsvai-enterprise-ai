@@ -1232,6 +1232,29 @@ export async function retryEmailProcessing(emailId) {
 }
 
 /**
+ * Reprocess AI analysis and routing for an email
+ * POST /api/email-automation/{email_id}/reprocess
+ */
+export async function reprocessEmail(emailId) {
+  const baseUrl = getApiBaseUrl();
+  const response = await fetch(`${baseUrl}/api/email-automation/${encodeURIComponent(emailId)}/reprocess`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+  });
+
+  if (!response.ok) {
+    let errorMsg = `Failed to reprocess email (${response.status})`;
+    try {
+      const errJson = await response.json();
+      if (errJson?.detail) errorMsg = errJson.detail;
+    } catch {}
+    throw new Error(errorMsg);
+  }
+
+  return await response.json();
+}
+
+/**
  * Human Approval: Dispatch reply via Microsoft Graph
  * POST /api/email-automation/{email_id}/approve-reply
  */

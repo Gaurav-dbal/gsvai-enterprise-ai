@@ -5,6 +5,7 @@ from decimal import Decimal, InvalidOperation
 from typing import Any, Dict, List, Optional
 
 from services.oracle_db_service import get_connection
+from services.ai_runtime_config import get_ai_runtime_config
 
 
 def _to_decimal(value: Any) -> Optional[Decimal]:
@@ -852,17 +853,22 @@ def get_invoice_ai_trace(invoice_id: int) -> Optional[Dict[str, Any]]:
             lines.append(ld)
 
         # Build Field Breakdown
-        snapshot_inv = original_data.get("invoice", {})
-        snapshot_mapping = {m["field"]: m for m in original_data.get("field_mapping", []) if "field" in m}
+        snapshot_inv = original_data.get("invoice", {}) if isinstance(original_data, dict) else {}
+        raw_mapping = original_data.get("field_mapping", []) if isinstance(original_data, dict) else []
+        snapshot_mapping = {m["field"]: m for m in raw_mapping if isinstance(m, dict) and "field" in m}
 
         def get_field_meta(field_key: str, label: str, val: Any, fallback_conf: float = 95.0) -> Dict[str, Any]:
-            m = snapshot_mapping.get(field_key, {})
-            conf = m.get("confidence") if m.get("confidence") is not None else fallback_conf
+            m = snapshot_mapping.get(field_key, {}) if isinstance(snapshot_mapping, dict) else {}
+            conf = m.get("confidence") if isinstance(m, dict) and m.get("confidence") is not None else fallback_conf
+            try:
+                conf_val = round(float(conf), 1)
+            except (ValueError, TypeError):
+                conf_val = fallback_conf
             return {
                 "field_key": field_key,
                 "field_name": label,
                 "extracted_value": val if val is not None else snapshot_inv.get(field_key),
-                "confidence": round(float(conf), 1),
+                "confidence": conf_val,
                 "validation_status": "VALID" if val is not None and val != "" else "MISSING",
                 "source": "OCI Document Understanding",
             }
@@ -983,42 +989,34 @@ def get_invoice_ai_trace(invoice_id: int) -> Optional[Dict[str, Any]]:
                 "description": "Awaiting final submission trigger to Oracle Cloud ERP.",
             })
 
-        # AI/ML Components Card
+        ai_cfg = get_ai_runtime_config()
+        # AI/ML Components Card for Invoice Processing
         ai_components = [
             {
                 "component": "Document Processing & OCR",
                 "provider": "Oracle Cloud Infrastructure (OCI)",
                 "service": "OCI Document Understanding",
                 "model_id": "oci.document-understanding",
-                "version": "Version not exposed by provider",
-                "region": "ap-hyderabad-1",
+                "version": "Production v1.0",
+                "region": ai_cfg.get("oci_region", "ap-hyderabad-1"),
                 "purpose": "Optical character recognition, bounding polygon detection, key-value extraction, and tabular line item parsing.",
             },
             {
-                "component": "Generative AI (Text-to-SQL)",
-                "provider": "Oracle Cloud Infrastructure (OCI) GenAI",
-                "service": "Cohere Command A",
-                "model_id": "cohere.command-a-03-2025",
-                "version": "Version not exposed by provider",
-                "region": "ap-hyderabad-1",
-                "purpose": "Natural language query synthesis and read-only Oracle SQL generation for Data Assistant.",
-            },
-            {
-                "component": "Enterprise Embeddings (RAG)",
-                "provider": "Oracle Cloud Infrastructure (OCI) GenAI",
-                "service": "Cohere Embed v4.0",
-                "model_id": "cohere.embed-v4.0",
-                "version": "Version not exposed by provider",
-                "region": "ap-hyderabad-1",
-                "purpose": "High-dimensional vector embeddings for AI Workspace document chunk retrieval.",
+                "component": "Deterministic Rule Validation",
+                "provider": "GSVAI Platform",
+                "service": "GSVAI Financial Rule Validation Engine",
+                "model_id": "rule-engine-v1",
+                "version": "Rule-Based",
+                "region": "Local Engine",
+                "purpose": "Arithmetic parity validation (lines + tax = total), date format validation, and duplicate invoice detection.",
             },
             {
                 "component": "Enterprise Database",
                 "provider": "Oracle Cloud",
                 "service": "Oracle Autonomous Database",
                 "model_id": "Oracle Database 23ai / Enterprise",
-                "version": "Version not exposed by provider",
-                "region": "ap-hyderabad-1",
+                "version": "Autonomous Transaction Processing",
+                "region": ai_cfg.get("oci_region", "ap-hyderabad-1"),
                 "purpose": "ACID transactional invoice persistence, user/role management, and audit telemetry.",
             },
             {
@@ -1027,7 +1025,7 @@ def get_invoice_ai_trace(invoice_id: int) -> Optional[Dict[str, Any]]:
                 "service": "Oracle Fusion Cloud ERP",
                 "model_id": "Payables Invoices REST API",
                 "version": "REST API v1",
-                "region": "ap-hyderabad-1",
+                "region": ai_cfg.get("oci_region", "ap-hyderabad-1"),
                 "purpose": "Automated accounts payable invoice synchronization and financial accounting entry.",
             },
         ]

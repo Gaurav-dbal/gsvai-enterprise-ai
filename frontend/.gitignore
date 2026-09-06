@@ -29,3 +29,18 @@ backend/wallet/
 
 # Microsoft authentication token cache
 backend/.msal_token_cache.bin
+.env
+.env.*
+backend/.env
+backend/wallet/
+.venv/
+**/__pycache__/
+*.pyc
+*.pem
+*.p12
+*.sso
+*.jks
+*.key
+*.log
+node_modules/
+dist/

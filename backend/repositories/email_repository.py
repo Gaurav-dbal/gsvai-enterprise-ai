@@ -309,7 +309,7 @@ class EmailRepository:
                 SELECT
                     COUNT(*) AS total_count,
                     NVL(SUM(CASE WHEN STATUS IN ('RECEIVED', 'UNREAD') THEN 1 ELSE 0 END), 0) AS unread_count,
-                    NVL(SUM(CASE WHEN STATUS IN ('ANALYZED', 'ROUTED', 'PROCESSING', 'AWAITING_APPROVAL', 'APPROVED', 'REPLIED') THEN 1 ELSE 0 END), 0) AS processed_count,
+                    NVL(SUM(CASE WHEN STATUS IN ('ANALYZED', 'ROUTED', 'PROCESSING', 'AWAITING_APPROVAL', 'APPROVED', 'REPLIED', 'SYSTEM_NOTIFICATION') THEN 1 ELSE 0 END), 0) AS processed_count,
                     NVL(SUM(CASE WHEN STATUS = 'AWAITING_APPROVAL' THEN 1 ELSE 0 END), 0) AS awaiting_approval_count,
                     NVL(SUM(CASE WHEN STATUS = 'REPLIED' THEN 1 ELSE 0 END), 0) AS replies_sent_count,
                     NVL(SUM(CASE WHEN STATUS IN ('AI_THROTTLED', 'FAILED') THEN 1 ELSE 0 END), 0) AS throttled_count

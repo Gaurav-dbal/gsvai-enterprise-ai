@@ -76,7 +76,7 @@ export function OverviewView({ onNavigate, backendStatus, latency }) {
     invoices_in_review_source: "GSVAI_INVOICES (Status: REVIEW_REQUIRED)",
     ai_queries_count: 0,
     ai_queries_source: "GSVAI_AUDIT_LOGS (Action: DATA_ASSISTANT_QUERY)",
-    ai_model_name: "Cohere Command A",
+    ai_model_name: "Active Generative AI",
     avg_latency_ms: 0.0,
   };
 
@@ -198,7 +198,7 @@ export function OverviewView({ onNavigate, backendStatus, latency }) {
           change={summary.avg_latency_ms > 0 ? `${summary.avg_latency_ms}ms avg` : (backendStatus === "connected" ? "Live Telemetry" : "Offline")}
           icon={Sparkles}
           color="purple"
-          subtitle={`${summary.ai_model_name || "Cohere Command A"} • Live Telemetry`}
+          subtitle={`${summary.ai_model_name || "Active Generative AI"} • Live Telemetry`}
           sourceInfo={summary.ai_queries_source || "GSVAI_AUDIT_LOGS (Action: DATA_ASSISTANT_QUERY)"}
         />
       </div>

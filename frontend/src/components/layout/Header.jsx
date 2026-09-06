@@ -1,6 +1,15 @@
 import React from "react";
-import { Search, RefreshCw } from "lucide-react";
+import { Search, RefreshCw, Palette } from "lucide-react";
 import { StatusIndicator } from "../common/StatusIndicator";
+
+export const THEMES = [
+  { id: "default", label: "Default Light", icon: "☀️" },
+  { id: "soft-gray", label: "Soft Gray", icon: "🏢" },
+  { id: "cool-blue", label: "Cool Blue", icon: "🌊" },
+  { id: "slate", label: "Slate Neutral", icon: "🏛️" },
+  { id: "dark", label: "Obsidian Dark", icon: "🌙" },
+  { id: "high-contrast", label: "High Contrast", icon: "⚡" },
+];
 
 export function Header({
   activeTitle,
@@ -8,6 +17,8 @@ export function Header({
   latency,
   onRefreshHealth,
   isRefreshing,
+  currentTheme = "default",
+  onThemeChange,
 }) {
   return (
     <header className="header">
@@ -23,7 +34,7 @@ export function Header({
         </div>
       </div>
 
-      {/* Right side: Search, Live Status, Actions, Profile */}
+      {/* Right side: Search, Live Status, Theme Switcher, Actions, Profile */}
       <div className="header-right">
         {/* Search bar */}
         <div className="search-input-wrapper">
@@ -49,6 +60,45 @@ export function Header({
         >
           <RefreshCw size={14} className={isRefreshing ? "animate-spin" : ""} />
         </button>
+
+        {/* Enterprise Appearance / Theme Selector */}
+        {onThemeChange && (
+          <div
+            className="theme-selector-wrapper"
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "6px",
+              padding: "4px 8px",
+              borderRadius: "var(--radius-md)",
+              backgroundColor: "var(--bg-surface)",
+              border: "1px solid var(--border-card)",
+            }}
+          >
+            <Palette size={14} style={{ color: "var(--text-secondary)", flexShrink: 0 }} />
+            <select
+              value={currentTheme}
+              onChange={(e) => onThemeChange(e.target.value)}
+              title="Select Enterprise Application Theme"
+              style={{
+                border: "none",
+                background: "transparent",
+                color: "var(--text-primary)",
+                fontSize: "12px",
+                fontWeight: "500",
+                padding: "2px 4px",
+                cursor: "pointer",
+                outline: "none",
+              }}
+            >
+              {THEMES.map((t) => (
+                <option key={t.id} value={t.id} style={{ background: "var(--bg-card)", color: "var(--text-primary)" }}>
+                  {t.icon} {t.label}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
 
         {/* User Profile */}
         <div className="user-profile-badge">

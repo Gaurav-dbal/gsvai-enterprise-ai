@@ -24,6 +24,7 @@ import {
   ChevronRight,
   Eye,
   UserCheck,
+  Palette,
 } from "lucide-react";
 import { SectionHeader } from "../../common/SectionHeader";
 import { StatusBadge } from "../../common/Badge";
@@ -47,7 +48,7 @@ import {
   testDatabaseConnection,
 } from "../../../api/client";
 
-export function SettingsView({ onHealthCheckUpdate, onNavigate }) {
+export function SettingsView({ onHealthCheckUpdate, onNavigate, currentTheme = "default", onThemeChange, backendData }) {
   // Navigation sub-tab: 'general' | 'users' | 'roles' | 'fusion' | 'integrations' | 'audit'
   const [activeTab, setActiveTab] = useState("general");
 
@@ -656,17 +657,205 @@ export function SettingsView({ onHealthCheckUpdate, onNavigate }) {
                 <strong>Autonomous Vector Database 23ai</strong>
               </div>
               <div style={{ padding: "8px 12px", backgroundColor: "var(--bg-surface-subtle)", borderRadius: "var(--radius-sm)", display: "flex", justifyContent: "space-between" }}>
-                <span style={{ color: "var(--text-secondary)" }}>OCI GenAI Region:</span>
-                <strong>ap-hyderabad-1</strong>
+                <span style={{ color: "var(--text-secondary)" }}>Active Generative LLM:</span>
+                <strong>{backendData?.ai_runtime?.llm?.provider || "Groq"} ({backendData?.ai_runtime?.llm?.model || "openai/gpt-oss-20b"})</strong>
               </div>
               <div style={{ padding: "8px 12px", backgroundColor: "var(--bg-surface-subtle)", borderRadius: "var(--radius-sm)", display: "flex", justifyContent: "space-between" }}>
-                <span style={{ color: "var(--text-secondary)" }}>OCI Document Understanding:</span>
-                <strong>Active (INVOICE Processor)</strong>
+                <span style={{ color: "var(--text-secondary)" }}>Vector Embeddings:</span>
+                <strong>{backendData?.ai_runtime?.embedding?.model || "BAAI/bge-large-en-v1.5"} ({backendData?.ai_runtime?.embedding?.dimension || 1024}d)</strong>
+              </div>
+              <div style={{ padding: "8px 12px", backgroundColor: "var(--bg-surface-subtle)", borderRadius: "var(--radius-sm)", display: "flex", justifyContent: "space-between" }}>
+                <span style={{ color: "var(--text-secondary)" }}>Document Intelligence:</span>
+                <strong>OCI Document Understanding (OCR & Tables)</strong>
               </div>
               <div style={{ padding: "8px 12px", backgroundColor: "var(--bg-surface-subtle)", borderRadius: "var(--radius-sm)", display: "flex", justifyContent: "space-between" }}>
                 <span style={{ color: "var(--text-secondary)" }}>Role-Based Access Control:</span>
                 <strong>Enforced via Backend Authorization</strong>
               </div>
+            </div>
+          </div>
+
+          {/* Enterprise Theme & Appearance Selector */}
+          <div className="card" style={{ gridColumn: "1 / -1", padding: "24px", display: "flex", flexDirection: "column", gap: "16px" }}>
+            <div className="card-header">
+              <h3 className="card-title" style={{ fontSize: "15px", fontWeight: "700", display: "flex", alignItems: "center", gap: "8px" }}>
+                <Palette size={16} style={{ color: "var(--color-primary)" }} />
+                Enterprise Theme & Background Appearance
+              </h3>
+              <span className="badge badge-live">Live Instant Preview</span>
+            </div>
+
+            <p style={{ fontSize: "13px", color: "var(--text-secondary)", margin: 0 }}>
+              Select an enterprise theme. Your choice is instantly applied across all platform workspaces and persisted across browser sessions.
+            </p>
+
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
+                gap: "14px",
+                marginTop: "4px",
+              }}
+            >
+              {[
+                {
+                  id: "default",
+                  name: "Default Light",
+                  description: "High-clarity executive light theme with pure white cards and crisp borders.",
+                  bgApp: "#F7F9FC",
+                  bgCard: "#FFFFFF",
+                  accent: "#2563EB",
+                  border: "#E4E7EC",
+                  tag: "Standard",
+                },
+                {
+                  id: "soft-gray",
+                  name: "Corporate Soft Gray",
+                  description: "Subtle neutral gray palette engineered for long auditing sessions.",
+                  bgApp: "#F1F3F5",
+                  bgCard: "#FFFFFF",
+                  accent: "#2563EB",
+                  border: "#CED4DA",
+                  tag: "Comfort",
+                },
+                {
+                  id: "cool-blue",
+                  name: "Cool Executive Blue",
+                  description: "Azure-tinted executive workspace with OCI sapphire accent borders.",
+                  bgApp: "#EFF6FB",
+                  bgCard: "#FFFFFF",
+                  accent: "#0284C7",
+                  border: "#BFD7EB",
+                  tag: "Executive",
+                },
+                {
+                  id: "slate",
+                  name: "Modern Slate",
+                  description: "Balanced slate background providing clean separation between panels.",
+                  bgApp: "#F1F5F9",
+                  bgCard: "#FFFFFF",
+                  accent: "#2563EB",
+                  border: "#CBD5E1",
+                  tag: "Modern",
+                },
+                {
+                  id: "dark",
+                  name: "Obsidian Dark",
+                  description: "Low-light enterprise theme with deep midnight panels and high-contrast text.",
+                  bgApp: "#0B0F19",
+                  bgCard: "#161F30",
+                  accent: "#3B82F6",
+                  border: "#1E293B",
+                  tag: "Dark Mode",
+                },
+                {
+                  id: "high-contrast",
+                  name: "High Contrast (WCAG AAA)",
+                  description: "Pure black accessibility theme with max-contrast white & cyan borders.",
+                  bgApp: "#000000",
+                  bgCard: "#0A0A0A",
+                  accent: "#38BDF8",
+                  border: "#737373",
+                  tag: "Accessible",
+                },
+              ].map((t) => {
+                const isSelected = (currentTheme || "default") === t.id;
+                return (
+                  <div
+                    key={t.id}
+                    onClick={() => onThemeChange && onThemeChange(t.id)}
+                    style={{
+                      border: isSelected ? "2px solid var(--color-primary)" : "1px solid var(--border-card)",
+                      borderRadius: "var(--radius-lg)",
+                      padding: "16px",
+                      cursor: "pointer",
+                      backgroundColor: "var(--bg-card)",
+                      transition: "all 0.15s ease",
+                      boxShadow: isSelected ? "0 0 0 3px rgba(37, 99, 235, 0.12)" : "var(--shadow-xs)",
+                      position: "relative",
+                    }}
+                  >
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                        <span style={{ fontSize: "14px", fontWeight: "700", color: "var(--text-primary)" }}>{t.name}</span>
+                        <span
+                          style={{
+                            fontSize: "10.5px",
+                            padding: "2px 6px",
+                            borderRadius: "var(--radius-sm)",
+                            backgroundColor: "var(--bg-surface)",
+                            color: "var(--text-secondary)",
+                            fontWeight: "600",
+                          }}
+                        >
+                          {t.tag}
+                        </span>
+                      </div>
+                      {isSelected && (
+                        <span
+                          style={{
+                            fontSize: "11px",
+                            fontWeight: "700",
+                            color: "var(--color-primary)",
+                            display: "flex",
+                            alignItems: "center",
+                            gap: "4px",
+                          }}
+                        >
+                          <Check size={13} /> Active
+                        </span>
+                      )}
+                    </div>
+
+                    <p style={{ fontSize: "12px", color: "var(--text-secondary)", margin: "0 0 12px 0", minHeight: "34px", lineHeight: "1.4" }}>
+                      {t.description}
+                    </p>
+
+                    {/* Color Swatches Preview */}
+                    <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
+                      <span style={{ fontSize: "11px", color: "var(--text-muted)", marginRight: "4px" }}>Palette:</span>
+                      <div
+                        title={`App Background: ${t.bgApp}`}
+                        style={{
+                          width: "20px",
+                          height: "20px",
+                          borderRadius: "4px",
+                          backgroundColor: t.bgApp,
+                          border: "1px solid #CBD5E1",
+                        }}
+                      />
+                      <div
+                        title={`Card Surface: ${t.bgCard}`}
+                        style={{
+                          width: "20px",
+                          height: "20px",
+                          borderRadius: "4px",
+                          backgroundColor: t.bgCard,
+                          border: "1px solid #CBD5E1",
+                        }}
+                      />
+                      <div
+                        title={`Accent: ${t.accent}`}
+                        style={{
+                          width: "20px",
+                          height: "20px",
+                          borderRadius: "4px",
+                          backgroundColor: t.accent,
+                        }}
+                      />
+                      <div
+                        title={`Border Tone: ${t.border}`}
+                        style={{
+                          width: "20px",
+                          height: "20px",
+                          borderRadius: "4px",
+                          backgroundColor: t.border,
+                        }}
+                      />
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           </div>
         </div>

@@ -739,7 +739,7 @@ export function DataAssistantView() {
                   End-to-End Pipeline Path
                 </span>
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "6px" }}>
-                  {["User Question", "Schema Context", "OCI LLM (Cohere)", "Safety Validation", "Oracle DB Exec", "Result Format"].map((step, idx, arr) => (
+                  {["User Question", "Schema Context", "Generative AI", "Safety Validation", "Oracle DB Exec", "Result Format"].map((step, idx, arr) => (
                     <React.Fragment key={idx}>
                       <div
                         style={{
@@ -821,33 +821,36 @@ export function DataAssistantView() {
                 </div>
               </div>
 
-              {/* 3. AI Model Information Card */}
+              {/* Step 3: Generative AI Metadata */}
               <div className="card" style={{ padding: "16px" }}>
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "10px" }}>
-                  <span style={{ fontSize: "11px", fontWeight: "700", color: "var(--text-tertiary)", textTransform: "uppercase" }}>
-                    3. AI Model & Inference Runtime
-                  </span>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                    <Cpu size={16} style={{ color: "var(--color-primary)" }} />
+                    <span style={{ fontSize: "13px", fontWeight: "700", color: "var(--text-primary)" }}>
+                      AI Inference Engine Metadata
+                    </span>
+                  </div>
                   <span style={{ fontSize: "11px", padding: "2px 6px", borderRadius: "4px", backgroundColor: "rgba(99, 102, 241, 0.1)", color: "var(--color-primary)", fontWeight: "600" }}>
-                    OCI Generative AI
+                    {queryResult.trace?.ai_model_info?.provider || "Active Enterprise AI"}
                   </span>
                 </div>
                 <div className="grid-2" style={{ gap: "10px" }}>
                   <div style={{ padding: "8px 12px", backgroundColor: "var(--bg-surface-subtle)", borderRadius: "var(--radius-sm)" }}>
                     <span style={{ fontSize: "11px", color: "var(--text-secondary)", display: "block" }}>AI Model</span>
                     <strong style={{ fontSize: "12.5px", color: "var(--text-primary)" }}>
-                      {queryResult.trace?.ai_model_info?.model_name || "Cohere Command A"}
+                      {queryResult.trace?.ai_model_info?.model_name || queryResult.trace?.ai_model_info?.model || "openai/gpt-oss-20b"}
                     </strong>
                   </div>
                   <div style={{ padding: "8px 12px", backgroundColor: "var(--bg-surface-subtle)", borderRadius: "var(--radius-sm)" }}>
-                    <span style={{ fontSize: "11px", color: "var(--text-secondary)", display: "block" }}>OCI Model ID</span>
+                    <span style={{ fontSize: "11px", color: "var(--text-secondary)", display: "block" }}>Model Identifier</span>
                     <code style={{ fontSize: "12px", color: "var(--color-primary)", fontWeight: "700" }}>
-                      {queryResult.trace?.ai_model_info?.oci_model_id || "cohere.command-a-03-2025"}
+                      {queryResult.trace?.ai_model_info?.model_id || queryResult.trace?.ai_model_info?.oci_model_id || "openai/gpt-oss-20b"}
                     </code>
                   </div>
                   <div style={{ padding: "8px 12px", backgroundColor: "var(--bg-surface-subtle)", borderRadius: "var(--radius-sm)" }}>
-                    <span style={{ fontSize: "11px", color: "var(--text-secondary)", display: "block" }}>Region & Serving Mode</span>
+                    <span style={{ fontSize: "11px", color: "var(--text-secondary)", display: "block" }}>Provider & Infrastructure</span>
                     <strong style={{ fontSize: "12px", color: "var(--text-primary)" }}>
-                      {queryResult.trace?.ai_model_info?.region || "ap-hyderabad-1"} • {queryResult.trace?.ai_model_info?.serving_mode || "On-Demand"}
+                      {queryResult.trace?.ai_model_info?.provider || "Groq"} • {queryResult.trace?.ai_model_info?.region || "Active LLM"}
                     </strong>
                   </div>
                   <div style={{ padding: "8px 12px", backgroundColor: "var(--bg-surface-subtle)", borderRadius: "var(--radius-sm)" }}>

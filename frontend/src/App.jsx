@@ -20,6 +20,19 @@ function App() {
   const [backendData, setBackendData] = useState(null);
   const [backendLatency, setBackendLatency] = useState(null);
   const [isRefreshingHealth, setIsRefreshingHealth] = useState(false);
+  const [currentTheme, setCurrentTheme] = useState(() => {
+    return localStorage.getItem("gsvai_theme") || "default";
+  });
+
+  // Apply theme to document root element
+  useEffect(() => {
+    if (currentTheme === "default") {
+      document.documentElement.removeAttribute("data-theme");
+    } else {
+      document.documentElement.setAttribute("data-theme", currentTheme);
+    }
+    localStorage.setItem("gsvai_theme", currentTheme);
+  }, [currentTheme]);
 
   // Health check function
   const refreshHealth = useCallback(async () => {
@@ -83,7 +96,15 @@ function App() {
       case "email-automation":
         return <EmailAutomationView />;
       case "settings":
-        return <SettingsView onHealthCheckUpdate={refreshHealth} onNavigate={setActiveTab} />;
+        return (
+          <SettingsView
+            onHealthCheckUpdate={refreshHealth}
+            onNavigate={setActiveTab}
+            currentTheme={currentTheme}
+            onThemeChange={setCurrentTheme}
+            backendData={backendData}
+          />
+        );
       default:
         return (
           <OverviewView
@@ -104,6 +125,7 @@ function App() {
         isCollapsed={isSidebarCollapsed}
         setIsCollapsed={setIsSidebarCollapsed}
         backendStatus={backendStatus}
+        backendData={backendData}
       />
 
       {/* Main Content Area */}
@@ -116,6 +138,8 @@ function App() {
           latency={backendLatency}
           onRefreshHealth={refreshHealth}
           isRefreshing={isRefreshingHealth}
+          currentTheme={currentTheme}
+          onThemeChange={setCurrentTheme}
         />
 
         {/* Dynamic View Content */}

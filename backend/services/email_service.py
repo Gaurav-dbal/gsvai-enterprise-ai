@@ -129,6 +129,47 @@ class EmailService:
         if not email:
             raise ValueError(f"Email not found: {email_id}")
 
+        # Deterministic check for Microsoft 365 Exchange NDR / delivery notifications BEFORE LLM
+        from services.email_system_notification import detect_system_notification
+        detection = detect_system_notification(email)
+        if detection["is_system_notification"]:
+            analysis_id = f"ANALYSIS-{uuid4().hex[:12].upper()}"
+            extracted_data_json = json.dumps({
+                "is_system_notification": True,
+                "category": detection["category"],
+                "signals": detection["signals"],
+            })
+            self.analysis_repository.create_analysis(
+                analysis_id=analysis_id,
+                email_id=email_id,
+                email_type="system_notification",
+                priority="low",
+                confidence=1.0,
+                extracted_data=extracted_data_json,
+                recommended_action="ignore_system_notification",
+                reasoning_summary=detection["reason"],
+            )
+            self.repository.update_email(
+                email_id,
+                status="SYSTEM_NOTIFICATION",
+                routed_agent="system_notification",
+                routing_action="ignore_system_notification",
+                error_message=None,
+            )
+            saved = self.analysis_repository.get_analysis(email_id)
+            if saved and isinstance(saved.get("extracted_data"), str):
+                try:
+                    saved["extracted_data"] = json.loads(saved["extracted_data"])
+                except Exception:
+                    pass
+            return saved or {
+                "email_type": "system_notification",
+                "priority": "low",
+                "confidence": 1.0,
+                "recommended_action": "ignore_system_notification",
+                "reasoning_summary": detection["reason"],
+            }
+
         try:
             analysis = analyze_email(email)
         except OCIThrottledException as te:
@@ -200,6 +241,32 @@ class EmailService:
         if not email:
             raise ValueError(f"Email not found: {email_id}")
 
+        from services.email_system_notification import is_system_notification
+        if is_system_notification(email):
+            self.repository.update_email(
+                email_id,
+                status="SYSTEM_NOTIFICATION",
+                routed_agent="system_notification",
+                routing_action="ignore_system_notification",
+                suggested_reply=None,
+                rag_sources=[],
+            )
+            return {
+                "email_id": email_id,
+                "analysis": {
+                    "email_type": "system_notification",
+                    "priority": "low",
+                    "recommended_action": "ignore_system_notification",
+                },
+                "routing": {
+                    "agent": "system_notification",
+                    "action": "ignore_system_notification",
+                    "status": "SYSTEM_NOTIFICATION",
+                    "answer": None,
+                    "sources": [],
+                },
+            }
+
         analysis = self.analysis_repository.get_analysis(email_id)
         if not analysis:
             analysis = self.analyze_email_by_id(email_id)
@@ -210,6 +277,27 @@ class EmailService:
                     "analysis": analysis,
                     "routing": {"status": "AI_THROTTLED", "message": analysis.get("error_message")},
                 }
+
+        if analysis.get("email_type") == "system_notification" or analysis.get("recommended_action") == "ignore_system_notification":
+            self.repository.update_email(
+                email_id,
+                status="SYSTEM_NOTIFICATION",
+                routed_agent="system_notification",
+                routing_action="ignore_system_notification",
+                suggested_reply=None,
+                rag_sources=[],
+            )
+            return {
+                "email_id": email_id,
+                "analysis": analysis,
+                "routing": {
+                    "agent": "system_notification",
+                    "action": "ignore_system_notification",
+                    "status": "SYSTEM_NOTIFICATION",
+                    "answer": None,
+                    "sources": [],
+                },
+            }
 
         routing_result = route_email(
             email=email,

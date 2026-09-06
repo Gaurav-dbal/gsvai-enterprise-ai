@@ -10,19 +10,28 @@ from services.oracle_db_service import get_database_connection, get_database_sou
 from services.execution_trace_service import ExecutionTracer
 from services.auth_rbac_service import log_audit_event
 
-try:
-    from services.oci_llm_service import (
-        client as oci_genai_client,
-        COMPARTMENT_ID,
-        MODEL_ID as LLM_MODEL_ID,
-        CohereChatRequest,
-        ChatDetails,
-        OnDemandServingMode,
-    )
-except Exception:
-    oci_genai_client = None
-    COMPARTMENT_ID = ""
-    LLM_MODEL_ID = "cohere.command-a-03-2025"
+# ---------------------------------------------------------
+# Groq LLM Configuration
+# ---------------------------------------------------------
+import os
+
+from dotenv import load_dotenv
+# pyrefly: ignore [missing-import]
+from groq import Groq, RateLimitError, APIError
+
+load_dotenv()
+
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+GROQ_MODEL = os.getenv("GROQ_MODEL", "openai/gpt-oss-20b")
+
+groq_client = Groq(api_key=GROQ_API_KEY) if GROQ_API_KEY else None
+
+print("=" * 60)
+print("GSVAI DATA ASSISTANT - GROQ CONFIGURATION")
+print("=" * 60)
+print(f"Groq Model : {GROQ_MODEL}")
+print(f"Groq Ready : {'YES' if groq_client else 'NO'}")
+print("=" * 60)
 
 
 # ---------------------------------------------------------
@@ -297,11 +306,16 @@ def generate_sql_from_question(
     data_source_name: str = "GSVAI Enterprise Database"
 ) -> Tuple[Optional[str], Optional[str], Optional[str]]:
     """
-    Calls OCI Generative AI with the discovered schema and user question.
+    Generates a single read-only Oracle SQL query using Groq.
     Returns (sql, explanation, error_message).
     """
-    if not oci_genai_client:
-        return None, None, "OCI Generative AI service client is not configured or unavailable."
+
+    if not groq_client:
+        return (
+            None,
+            None,
+            "Groq AI service client is not configured."
+        )
 
     prompt = f"""You are GSVAI's Enterprise Oracle SQL Analytics Engine.
 Your task is to generate a single, highly accurate, read-only Oracle SQL query to answer the user's question.
@@ -336,52 +350,121 @@ USER QUESTION:
 """
 
     try:
-        chat_request = CohereChatRequest(
-            message=prompt,
-            max_tokens=500,
+        print("Groq SQL generation request...")
+
+        response = groq_client.chat.completions.create(
+            model=GROQ_MODEL,
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "You are GSVAI's enterprise Oracle SQL "
+                        "generation engine. Generate safe "
+                        "read-only SQL only."
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": prompt,
+                },
+            ],
+            max_completion_tokens=700,
             temperature=0.1,
+            reasoning_effort="low",
+            include_reasoning=False,
+            stream=False,
         )
 
-        chat_details = ChatDetails(
-            compartment_id=COMPARTMENT_ID,
-            serving_mode=OnDemandServingMode(
-                model_id=LLM_MODEL_ID
-            ),
-            chat_request=chat_request,
-        )
+        response_text = (
+            response.choices[0].message.content or ""
+        ).strip()
 
-        response = oci_genai_client.chat(chat_details=chat_details)
-        response_text = response.data.chat_response.text.strip()
+        if not response_text:
+            return (
+                None,
+                None,
+                "Groq returned an empty SQL generation response."
+            )
 
-        # Check for CANNOT_ANSWER token
+        print("Groq SQL generation successful.")
+
         if "CANNOT_ANSWER:" in response_text:
-            reason = response_text.split("CANNOT_ANSWER:")[-1].strip()
-            return None, None, f"I cannot answer this question from the available database schema. {reason}"
+            reason = response_text.split(
+                "CANNOT_ANSWER:", 1
+            )[1].strip()
 
-        # Extract SQL from ```sql ... ``` block
-        sql_match = re.search(r"```(?:sql)?(.*?)```", response_text, flags=re.DOTALL | re.IGNORECASE)
+            return (
+                None,
+                None,
+                "I cannot answer this question from the "
+                "available database schema. "
+                f"{reason}"
+            )
+
+        sql_match = re.search(
+            r"```(?:sql)?(.*?)```",
+            response_text,
+            flags=re.DOTALL | re.IGNORECASE
+        )
+
         if sql_match:
-            generated_sql = clean_sql_string(sql_match.group(1))
+            generated_sql = clean_sql_string(
+                sql_match.group(1)
+            )
+        elif "EXPLANATION:" in response_text:
+            generated_sql = clean_sql_string(
+                response_text.split(
+                    "EXPLANATION:", 1
+                )[0]
+            )
         else:
-            # Fallback: if no code fence, take the text before EXPLANATION:
-            if "EXPLANATION:" in response_text:
-                parts = response_text.split("EXPLANATION:")
-                generated_sql = clean_sql_string(parts[0])
-            else:
-                generated_sql = clean_sql_string(response_text)
+            generated_sql = clean_sql_string(
+                response_text
+            )
 
-        # Extract explanation
-        explanation = ""
         if "EXPLANATION:" in response_text:
-            explanation = response_text.split("EXPLANATION:")[-1].strip()
+            explanation = response_text.split(
+                "EXPLANATION:", 1
+            )[1].strip()
         else:
-            explanation = f"Calculates real-time aggregations from {', '.join(schema_info.get('tables', [])[:3])} to answer: {question}"
+            explanation = (
+                f"Calculates real-time aggregations from "
+                f"{', '.join(schema_info.get('tables', [])[:3])} "
+                f"to answer: {question}"
+            )
 
-        return generated_sql, explanation, None
+        return (
+            generated_sql,
+            explanation,
+            None
+        )
+
+    except RateLimitError as e:
+        print(f"Groq rate limit error: {e}")
+
+        return (
+            None,
+            None,
+            "Groq rate limit reached. Please retry shortly."
+        )
+
+    except APIError as e:
+        print(f"Groq API error: {e}")
+
+        return (
+            None,
+            None,
+            f"Groq API error: {str(e)}"
+        )
 
     except Exception as e:
-        print(f"LLM SQL Generation Error: {e}")
-        return None, None, f"Failed to generate SQL with OCI GenAI: {str(e)}"
+        print(f"Groq SQL Generation Error: {e}")
+
+        return (
+            None,
+            None,
+            f"Failed to generate SQL with Groq: {str(e)}"
+        )
 
 
 # ---------------------------------------------------------
@@ -495,7 +578,7 @@ def process_data_assistant_query(
     Full end-to-end Data Assistant workflow with comprehensive AI process transparency:
     1. Resolve Target Data Source.
     2. Discover Real Database Schema.
-    3. LLM SQL Generation via OCI Generative AI.
+    3. LLM SQL Generation via Groq GPT-OSS 20B.
     4. Strict SQL Safety & Read-Only Validation.
     5. Real Oracle Database Execution.
     6. Educational Execution Tracing & Audit Telemetry.
@@ -507,12 +590,12 @@ def process_data_assistant_query(
 
     # AI Model Information
     ai_model_info = {
-        "model_name": "Cohere Command A",
-        "oci_model_id": LLM_MODEL_ID or "cohere.command-a-03-2025",
-        "region": "ap-hyderabad-1",
-        "serving_mode": "On-Demand",
-        "version": "Version not exposed by provider",
-        "provider": "Oracle Cloud Infrastructure (OCI) Generative AI",
+        "model_name": "GPT-OSS 20B",
+        "model_id": GROQ_MODEL,
+        "region": "Groq Cloud",
+        "serving_mode": "API",
+        "version": "Provider managed",
+        "provider": "Groq",
     }
 
     # Step 1: Resolve Data Source
@@ -618,8 +701,8 @@ def process_data_assistant_query(
         name="LLM SQL Generation",
         status="completed",
         duration_ms=dur_gen,
-        explanation="OCI Generative AI (Cohere Command A) synthesized read-only Oracle SQL from discovered schema.",
-        details={"generated_sql": generated_sql, "model": LLM_MODEL_ID, "generation_time_ms": round(dur_gen, 1)}
+        explanation="Groq GPT-OSS 20B synthesized read-only Oracle SQL from discovered schema.",
+        details={"generated_sql": generated_sql, "model": GROQ_MODEL, "generation_time_ms": round(dur_gen, 1)}
     )
 
     # Step 4: SQL Safety Validation
@@ -753,10 +836,10 @@ def process_data_assistant_query(
                     "output": f"{len(schema_info['tables'])} tables & column definitions",
                 },
                 {
-                    "stage": "OCI GenAI SQL Generation",
-                    "what": "Synthesizes standard Oracle SQL using Cohere Command A with strict few-shot enterprise prompt.",
+                    "stage": "Groq SQL Generation",
+                    "what": "Synthesizes standard Oracle SQL using Groq GPT-OSS 20B with strict enterprise prompt.",
                     "why": "Translates high-level business intent into optimized, ANSI/Oracle-compliant aggregate queries.",
-                    "technology": "OCI Generative AI (Cohere Command A)",
+                    "technology": "Groq API / GPT-OSS 20B",
                     "input": "User question + Discovered database schema",
                     "output": generated_sql,
                 },

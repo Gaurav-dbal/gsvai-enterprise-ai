@@ -1,24 +1,14 @@
-# pyrefly: ignore [missing-import]
-import oci
+from sentence_transformers import SentenceTransformer
 
 
-MODEL_ID = "cohere.embed-v4.0"
-
-
-# ---------------------------------------------------------
-# OCI Configuration
-# ---------------------------------------------------------
-
-config = oci.config.from_file()
+MODEL_ID = "BAAI/bge-large-en-v1.5"
 
 
 # ---------------------------------------------------------
-# OCI Generative AI Client
+# Local Embedding Model
 # ---------------------------------------------------------
 
-client = oci.generative_ai_inference.GenerativeAiInferenceClient(
-    config=config
-)
+model = SentenceTransformer(MODEL_ID)
 
 
 # ---------------------------------------------------------
@@ -26,25 +16,17 @@ client = oci.generative_ai_inference.GenerativeAiInferenceClient(
 # ---------------------------------------------------------
 
 def generate_embedding(text: str):
+    """
+    Generate a 1024-dimensional embedding locally.
 
-    details = oci.generative_ai_inference.models.EmbedTextDetails(
-        compartment_id=config["tenancy"],
+    This replaces OCI Cohere Embed v4.0 while keeping
+    compatibility with the existing Oracle Vector Search
+    configuration.
+    """
 
-        serving_mode=oci.generative_ai_inference.models.OnDemandServingMode(
-            model_id=MODEL_ID
-        ),
-
-        inputs=[text],
-
-        input_type="SEARCH_DOCUMENT",
-
-        output_dimensions=1024
+    embedding = model.encode(
+        text,
+        normalize_embeddings=True
     )
 
-    response = client.embed_text(
-        embed_text_details=details
-    )
-
-    embedding = response.data.embeddings[0]
-
-    return embedding
+    return embedding.tolist()

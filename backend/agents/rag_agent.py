@@ -1,7 +1,9 @@
 from typing import Any, Dict
 import re
 
-from services.rag_service import answer_question, build_rag_context
+from services.rag_service import build_rag_context
+from services.oci_llm_service import generate_answer, generate_general_answer
+from services.ai_runtime_config import get_ai_runtime_config, format_rate_limit_error
 
 
 def _clean_text(text: str) -> str:
@@ -19,9 +21,10 @@ def rag_agent(
 ) -> Dict[str, Any]:
     """
     RAG Agent.
-    Uses the existing GSVAI RAG pipeline to answer
+    Uses the active GSVAI RAG pipeline to answer
     knowledge-based questions contained in emails.
-    Handles OCI HTTP 429 throttling gracefully while preserving retrieved sources.
+    Guarantees exactly ONE vector search execution per processing request.
+    Handles rate-limiting gracefully while preserving retrieved sources.
     """
     subject = email.get("subject") or ""
     body = _clean_text(email.get("body") or "")
@@ -34,10 +37,58 @@ Email:
 {body[:2500]}
 """.strip()
 
+    # Step 1: Execute semantic vector search exactly once
+    context, sources = build_rag_context(
+        query=question,
+        top_k=5,
+    )
+
+    if not context:
+        try:
+            fallback_prompt = f"""
+You are an enterprise AI communication assistant for GSVAI Enterprise Support.
+An incoming email was received:
+Subject: {subject}
+Message: {body[:2000]}
+
+Draft a professional, courteous, and helpful response email:
+1. Acknowledge their specific issue or question with empathy.
+2. Provide clear standard preliminary troubleshooting steps or guidance applicable to this inquiry (e.g., verifying credentials, system status check, browser cache clearing, or standard support process).
+3. State that an enterprise support specialist is reviewing the request and will follow up with any required resolution details.
+4. Sign off professionally as 'GSVAI Enterprise Support Team'.
+
+Do not invent ticket numbers. Keep the tone helpful, reassuring, and enterprise-grade.
+"""
+            fallback_draft = generate_general_answer(question=fallback_prompt)
+            return {
+                "agent": "rag_agent",
+                "status": "COMPLETED",
+                "action": "rag_general_support_draft",
+                "email_id": email.get("email_id"),
+                "answer": fallback_draft,
+                "sources": [],
+                "throttled": False,
+            }
+        except Exception as exc:
+            err_str = str(exc).lower()
+            if "429" in err_str or "throttl" in err_str or "rate limit" in err_str:
+                return {
+                    "agent": "rag_agent",
+                    "status": "AI_THROTTLED",
+                    "action": "rag_processing_throttled",
+                    "email_id": email.get("email_id"),
+                    "answer": None,
+                    "sources": [],
+                    "throttled": True,
+                    "error_message": format_rate_limit_error(),
+                }
+            raise
+
+    # Step 2: Generate response using active LLM
     try:
-        rag_result = answer_question(
+        answer = generate_answer(
             question=question,
-            top_k=5,
+            context=context,
         )
 
         return {
@@ -45,21 +96,17 @@ Email:
             "status": "COMPLETED",
             "action": "rag_answer_generated",
             "email_id": email.get("email_id"),
-            "answer": rag_result.get("answer"),
-            "sources": rag_result.get("sources", []),
+            "answer": answer,
+            "sources": sources,
             "throttled": False,
         }
 
     except Exception as exc:
         err_str = str(exc).lower()
-        if "429" in err_str or "throttl" in err_str or "too many requests" in err_str:
-            # Semantic search can still retrieve the real documents
-            sources = []
-            try:
-                _, retrieved_sources = build_rag_context(question, top_k=5)
-                sources = retrieved_sources
-            except Exception:
-                pass
+        if "429" in err_str or "throttl" in err_str or "too many requests" in err_str or "rate limit" in err_str:
+            ai_cfg = get_ai_runtime_config()
+            vdb_name = ai_cfg["vector_database"]["provider"]
+            err_msg = format_rate_limit_error()
 
             return {
                 "agent": "rag_agent",
@@ -67,8 +114,8 @@ Email:
                 "action": "rag_processing_throttled",
                 "email_id": email.get("email_id"),
                 "answer": None,
-                "sources": sources,
+                "sources": sources,  # Preserves already retrieved sources without duplicate search
                 "throttled": True,
-                "error_message": "OCI Generative AI is temporarily throttled (HTTP 429). Oracle AI Vector Search retrieved relevant knowledge, but LLM response drafting is temporarily queued.",
+                "error_message": f"{err_msg} {vdb_name} retrieved relevant knowledge, but response drafting is temporarily queued.",
             }
         raise

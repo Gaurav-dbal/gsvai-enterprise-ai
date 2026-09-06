@@ -191,3 +191,174 @@ button {
   outline: none;
   transition: all 0.15s ease;
 }
+
+/* =========================================================
+   GSVAI ENTERPRISE THEMES
+   ========================================================= */
+
+[data-theme="soft-gray"] {
+  --bg-app: #F1F3F5;
+  --bg-sidebar: #F8F9FA;
+  --bg-header: #FFFFFF;
+  --bg-card: #FFFFFF;
+  --bg-card-hover: #F8F9FA;
+  --bg-input: #FFFFFF;
+  --bg-input-focus: #FFFFFF;
+  --bg-surface: #E9ECEF;
+  --bg-surface-subtle: #F1F3F5;
+  --border-subtle: #DEE2E6;
+  --border-card: #CED4DA;
+  --border-card-hover: #ADB5BD;
+}
+
+[data-theme="cool-blue"] {
+  --bg-app: #EFF6FB;
+  --bg-sidebar: #F5F9FD;
+  --bg-header: #FFFFFF;
+  --bg-card: #FFFFFF;
+  --bg-card-hover: #F0F7FD;
+  --bg-input: #FFFFFF;
+  --bg-input-focus: #FFFFFF;
+  --bg-surface: #E1EFF8;
+  --bg-surface-subtle: #EDF5FA;
+  --text-primary: #0F172A;
+  --border-subtle: #D0E1F0;
+  --border-card: #BFD7EB;
+  --border-card-hover: #93C5FD;
+  --color-primary: #0284C7;
+  --color-primary-hover: #0369A1;
+  --color-primary-light: #E0F2FE;
+  --color-primary-border: #BAE6FD;
+}
+
+[data-theme="slate"] {
+  --bg-app: #F1F5F9;
+  --bg-sidebar: #FFFFFF;
+  --bg-header: #FFFFFF;
+  --bg-card: #FFFFFF;
+  --bg-card-hover: #F8FAFC;
+  --bg-input: #FFFFFF;
+  --bg-input-focus: #FFFFFF;
+  --bg-surface: #E2E8F0;
+  --bg-surface-subtle: #F1F5F9;
+  --text-primary: #0F172A;
+  --text-secondary: #475569;
+  --text-muted: #64748B;
+  --border-subtle: #E2E8F0;
+  --border-card: #CBD5E1;
+  --border-card-hover: #94A3B8;
+}
+
+[data-theme="dark"] {
+  --bg-app: #0B0F19;
+  --bg-sidebar: #111827;
+  --bg-header: #111827;
+  --bg-card: #161F30;
+  --bg-card-hover: #1E293B;
+  --bg-input: #0F172A;
+  --bg-input-focus: #1E293B;
+  --bg-surface: #1E293B;
+  --bg-surface-subtle: #111827;
+
+  --text-primary: #F8FAFC;
+  --text-secondary: #94A3B8;
+  --text-muted: #64748B;
+  --text-dim: #334155;
+
+  --border-subtle: #1E293B;
+  --border-card: #1E293B;
+  --border-card-hover: #334155;
+
+  --color-primary: #3B82F6;
+  --color-primary-hover: #60A5FA;
+  --color-primary-light: rgba(59, 130, 246, 0.15);
+  --color-primary-border: #1E3A8A;
+
+  --color-success-bg: rgba(18, 183, 106, 0.15);
+  --color-success-border: #065F46;
+  --color-success-text: #34D399;
+
+  --color-warning-bg: rgba(247, 144, 9, 0.15);
+  --color-warning-border: #92400E;
+  --color-warning-text: #FBBF24;
+
+  --color-danger-bg: rgba(240, 68, 56, 0.15);
+  --color-danger-border: #991B1B;
+  --color-danger-text: #F87171;
+
+  --color-info-bg: rgba(11, 165, 236, 0.15);
+  --color-info-border: #075985;
+  --color-info-text: #38BDF8;
+
+  --color-purple-bg: rgba(127, 86, 217, 0.15);
+  --color-purple-border: #581C87;
+  --color-purple-text: #C084FC;
+
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.5);
+  --shadow-md: 0 4px 8px -2px rgba(0, 0, 0, 0.5);
+  --shadow-lg: 0 12px 16px -4px rgba(0, 0, 0, 0.6);
+}
+
+[data-theme="dark"] ::-webkit-scrollbar-thumb {
+  background: #334155;
+}
+
+[data-theme="dark"] ::-webkit-scrollbar-thumb:hover {
+  background: #475569;
+}
+
+[data-theme="high-contrast"] {
+  --bg-app: #000000;
+  --bg-sidebar: #000000;
+  --bg-header: #000000;
+  --bg-card: #0A0A0A;
+  --bg-card-hover: #141414;
+  --bg-input: #000000;
+  --bg-input-focus: #141414;
+  --bg-surface: #141414;
+  --bg-surface-subtle: #000000;
+
+  --text-primary: #FFFFFF;
+  --text-secondary: #E5E5E5;
+  --text-muted: #A3A3A3;
+  --text-dim: #525252;
+
+  --border-subtle: #525252;
+  --border-card: #737373;
+  --border-card-hover: #FFFFFF;
+
+  --color-primary: #38BDF8;
+  --color-primary-hover: #7DD3FC;
+  --color-primary-light: rgba(56, 189, 248, 0.2);
+  --color-primary-border: #38BDF8;
+
+  --color-success-bg: #064E3B;
+  --color-success-border: #10B981;
+  --color-success-text: #A7F3D0;
+
+  --color-warning-bg: #78350F;
+  --color-warning-border: #F59E0B;
+  --color-warning-text: #FDE68A;
+
+  --color-danger-bg: #7F1D1D;
+  --color-danger-border: #EF4444;
+  --color-danger-text: #FECACA;
+
+  --color-info-bg: #0C4A6E;
+  --color-info-border: #0EA5E9;
+  --color-info-text: #BAE6FD;
+
+  --shadow-xs: 0 0 0 1px #737373;
+  --shadow-sm: 0 0 0 1px #737373;
+  --shadow-md: 0 0 0 1px #A3A3A3;
+  --shadow-lg: 0 0 0 2px #FFFFFF;
+}
+
+[data-theme="high-contrast"] ::-webkit-scrollbar-thumb {
+  background: #525252;
+}
+
+[data-theme="high-contrast"] ::-webkit-scrollbar-thumb:hover {
+  background: #A3A3A3;
+}
