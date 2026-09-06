@@ -29,3 +29,8 @@ uvicorn==0.52.4
 
 sentence-transformers
 groq
+
+torch==2.14.0
+transformers==5.16.1
+sentence-transformers==6.0.1
+groq==1.7.0
