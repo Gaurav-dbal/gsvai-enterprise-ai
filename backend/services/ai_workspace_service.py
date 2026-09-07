@@ -23,6 +23,37 @@ from services.oci_llm_service import (
     MODEL_ID as LLM_MODEL_ID,
 )
 from services.execution_trace_service import ExecutionTracer
+from services.ai_runtime_config import (
+    get_llm_config,
+    get_embedding_config,
+)
+
+
+def _embedding_trace_details(telemetry: Dict[str, Any]) -> Dict[str, Any]:
+    """Build dynamic embedding telemetry from active runtime configuration."""
+    cfg = get_embedding_config()
+
+    return {
+        "provider": cfg["provider"],
+        "service": cfg.get("service"),
+        "model": telemetry.get("model_id", cfg["model"]),
+        "dimensions": telemetry.get("dimensions", cfg["dimensions"]),
+        "input_type": "SEARCH_DOCUMENT",
+    }
+
+
+def _llm_trace_details() -> Dict[str, Any]:
+    """Build dynamic LLM telemetry from active runtime configuration."""
+    cfg = get_llm_config()
+
+    return {
+        "provider": cfg["provider"],
+        "model": cfg["model"],
+        "endpoint": cfg.get("endpoint"),
+        "temperature": 0.2,
+        "max_tokens": 400,
+        "serving_mode": "API",
+    }
 
 
 # =========================================================
@@ -340,12 +371,16 @@ def handle_date_based_query(question: str, tracer: Optional[ExecutionTracer] = N
                     explanation="No documents matched the temporal filter.",
                     details={"documents_found": 0}
                 )
+                llm_cfg = get_llm_config()
                 tracer.add_step(
-                    name="OCI Generative AI",
+                    name=f"{llm_cfg['provider']} LLM",
                     status="skipped",
                     duration_ms=0,
                     explanation="LLM invocation skipped since no documents were found.",
-                    details={"model": LLM_MODEL_ID}
+                    details={
+                        "provider": llm_cfg["provider"],
+                        "model": llm_cfg["model"]
+                    }
                 )
                 tracer.add_step(
                     name="Response Generated",
@@ -451,18 +486,17 @@ Summary Response:
         llm_duration_ms = (time.perf_counter() - t_llm_start) * 1000
 
         if tracer:
+            llm_cfg = get_llm_config()
+
             tracer.add_step(
-                name="OCI Generative AI",
+                name=f"{llm_cfg['provider']} LLM",
                 status="completed",
                 duration_ms=llm_duration_ms,
-                explanation=f"Invoked OCI Generative AI model ({LLM_MODEL_ID}) to synthesize date summary.",
-                details={
-                    "provider": "OCI Generative AI",
-                    "model": LLM_MODEL_ID,
-                    "temperature": 0.3,
-                    "max_tokens": 450,
-                    "inference_duration_ms": round(llm_duration_ms, 1)
-                }
+                explanation=(
+                    f"Invoked {llm_cfg['provider']} model ({llm_cfg['model']}) "
+                    f"to synthesize date summary."
+                ),
+                details=_llm_trace_details()
             )
             tracer.add_step(
                 name="Response Generated",
@@ -640,16 +674,17 @@ Executive Summary:
         llm_duration_ms = (time.perf_counter() - t_llm_start) * 1000
 
         if tracer:
+            llm_cfg = get_llm_config()
+
             tracer.add_step(
-                name="OCI Generative AI",
+                name=f"{llm_cfg['provider']} LLM",
                 status="completed",
                 duration_ms=llm_duration_ms,
-                explanation=f"Invoked OCI Generative AI model ({LLM_MODEL_ID}) to generate structured executive summary.",
-                details={
-                    "provider": "OCI Generative AI",
-                    "model": LLM_MODEL_ID,
-                    "inference_duration_ms": round(llm_duration_ms, 1)
-                }
+                explanation=(
+                    f"Invoked {llm_cfg['provider']} model ({llm_cfg['model']}) "
+                    f"to generate structured executive summary."
+                ),
+                details=_llm_trace_details()
             )
             tracer.add_step(
                 name="Response Generated",
@@ -809,17 +844,18 @@ def query_ai_workspace(
             document_id=document_id
         )
 
+        embedding_cfg = get_embedding_config()
+
         tracer.add_step(
             name="Embedding Generation",
             status="completed",
             duration_ms=telemetry.get("embedding_duration_ms", 180),
-            explanation=f"Generated dense {telemetry.get('dimensions', 1024)}-dimension vector using OCI Generative AI ({telemetry.get('model_id', EMBEDDING_MODEL_ID)}).",
-            details={
-                "provider": "OCI Generative AI",
-                "model": telemetry.get("model_id", EMBEDDING_MODEL_ID),
-                "dimensions": telemetry.get("dimensions", 1024),
-                "input_type": "SEARCH_DOCUMENT"
-            }
+            explanation=(
+                f"Generated dense {telemetry.get('dimensions', embedding_cfg['dimensions'])}-dimension "
+                f"vector using {embedding_cfg['provider']} "
+                f"({telemetry.get('model_id', embedding_cfg['model'])})."
+            ),
+            details=_embedding_trace_details(telemetry)
         )
 
         tracer.add_step(
@@ -849,12 +885,16 @@ def query_ai_workspace(
                 explanation="No relevant chunks found in the selected document.",
                 details={"chunks_found": 0}
             )
+            llm_cfg = get_llm_config()
             tracer.add_step(
-                name="OCI Generative AI",
+                name=f"{llm_cfg['provider']} LLM",
                 status="skipped",
                 duration_ms=0,
                 explanation="LLM invocation skipped due to empty context.",
-                details={"model": LLM_MODEL_ID}
+                details={
+                    "provider": llm_cfg["provider"],
+                    "model": llm_cfg["model"]
+                }
             )
             tracer.add_step(
                 name="Response Generated",
@@ -900,18 +940,17 @@ def query_ai_workspace(
         )
         llm_duration_ms = (time.perf_counter() - t_llm_start) * 1000
 
+        llm_cfg = get_llm_config()
+
         tracer.add_step(
-            name="OCI Generative AI",
+            name=f"{llm_cfg['provider']} LLM",
             status="completed",
             duration_ms=llm_duration_ms,
-            explanation=f"Invoked OCI Generative AI model ({LLM_MODEL_ID}) with grounded context to synthesize answer.",
-            details={
-                "provider": "OCI Generative AI",
-                "model": LLM_MODEL_ID,
-                "temperature": 0.2,
-                "max_tokens": 400,
-                "serving_mode": "On-Demand"
-            }
+            explanation=(
+                f"Invoked {llm_cfg['provider']} model ({llm_cfg['model']}) "
+                f"with grounded context to synthesize answer."
+            ),
+            details=_llm_trace_details()
         )
 
         insufficient_indicators = [
@@ -1007,17 +1046,18 @@ def query_ai_workspace(
             }
         )
 
+        embedding_cfg = get_embedding_config()
+
         tracer.add_step(
             name="Embedding Generation",
             status="completed",
             duration_ms=telemetry.get("embedding_duration_ms", 180),
-            explanation=f"Generated dense {telemetry.get('dimensions', 1024)}-dimension vector using OCI Generative AI ({telemetry.get('model_id', EMBEDDING_MODEL_ID)}).",
-            details={
-                "provider": "OCI Generative AI",
-                "model": telemetry.get("model_id", EMBEDDING_MODEL_ID),
-                "dimensions": telemetry.get("dimensions", 1024),
-                "input_type": "SEARCH_DOCUMENT"
-            }
+            explanation=(
+                f"Generated dense {telemetry.get('dimensions', embedding_cfg['dimensions'])}-dimension "
+                f"vector using {embedding_cfg['provider']} "
+                f"({telemetry.get('model_id', embedding_cfg['model'])})."
+            ),
+            details=_embedding_trace_details(telemetry)
         )
 
         tracer.add_step(
@@ -1058,18 +1098,17 @@ def query_ai_workspace(
             )
             llm_duration_ms = (time.perf_counter() - t_llm_start) * 1000
 
+            llm_cfg = get_llm_config()
+
             tracer.add_step(
-                name="OCI Generative AI",
+                name=f"{llm_cfg['provider']} LLM",
                 status="completed",
                 duration_ms=llm_duration_ms,
-                explanation=f"Invoked OCI Generative AI model ({LLM_MODEL_ID}) with multi-document context.",
-                details={
-                    "provider": "OCI Generative AI",
-                    "model": LLM_MODEL_ID,
-                    "temperature": 0.2,
-                    "max_tokens": 400,
-                    "serving_mode": "On-Demand"
-                }
+                explanation=(
+                    f"Invoked {llm_cfg['provider']} model ({llm_cfg['model']}) "
+                    f"with multi-document context."
+                ),
+                details=_llm_trace_details()
             )
 
             insufficient_indicators = [
@@ -1185,18 +1224,17 @@ def query_ai_workspace(
     gen_answer = generate_general_answer(q_clean)
     llm_duration_ms = (time.perf_counter() - t_llm_start) * 1000
 
+    llm_cfg = get_llm_config()
+
     tracer.add_step(
-        name="OCI Generative AI",
+        name=f"{llm_cfg['provider']} LLM",
         status="completed",
         duration_ms=llm_duration_ms,
-        explanation=f"Invoked OCI Generative AI foundation model ({LLM_MODEL_ID}) to generate answer.",
-        details={
-            "provider": "OCI Generative AI",
-            "model": LLM_MODEL_ID,
-            "temperature": 0.3,
-            "max_tokens": 450,
-            "serving_mode": "On-Demand"
-        }
+        explanation=(
+            f"Invoked {llm_cfg['provider']} foundation model "
+            f"({llm_cfg['model']}) to generate answer."
+        ),
+        details=_llm_trace_details()
     )
 
     tracer.add_step(
