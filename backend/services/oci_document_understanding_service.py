@@ -9,6 +9,8 @@ from typing import Any, Dict, List, Optional
 # pyrefly: ignore [missing-import]
 import oci
 
+from services.oci_auth import get_oci_config
+
 from dotenv import load_dotenv
 
 
@@ -23,7 +25,7 @@ load_dotenv()
 # OCI Configuration
 # =========================================================
 
-config = oci.config.from_file()
+config, signer, _ = get_oci_config()
 
 OCI_COMPARTMENT_ID = os.getenv(
     "OCI_COMPARTMENT_ID"
@@ -44,13 +46,15 @@ OCI_DOCUMENT_BUCKET = os.getenv(
 
 object_storage_client = (
     oci.object_storage.ObjectStorageClient(
-        config
+        config,
+        signer=signer
     )
 )
 
 document_client = (
     oci.ai_document.AIServiceDocumentClient(
-        config
+        config,
+        signer=signer
     )
 )
 
