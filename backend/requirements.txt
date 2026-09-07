@@ -34,3 +34,5 @@ oracledb
 msal
 pymupdf
 requests
+
+python-multipart
