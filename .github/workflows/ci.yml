@@ -34,6 +34,8 @@ jobs:
 
       - name: Run NDR system notification tests
         working-directory: backend
+        env:
+          GROQ_API_KEY: "ci-test-key"
         run: |
           python -m unittest discover \
             -s . \
