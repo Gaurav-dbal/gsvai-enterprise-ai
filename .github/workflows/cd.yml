@@ -1,0 +1,94 @@
+name: GSVAI CD
+
+on:
+  workflow_dispatch:
+
+jobs:
+  deploy-test:
+    name: Deploy to OCI Test Container
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Configure SSH
+        shell: bash
+        env:
+          OCI_SSH_KEY: ${{ secrets.OCI_SSH_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "$OCI_SSH_KEY" > ~/.ssh/gsvai_oci_key
+          chmod 600 ~/.ssh/gsvai_oci_key
+          ssh-keyscan -H "${{ secrets.OCI_HOST }}" >> ~/.ssh/known_hosts
+
+      - name: Deploy commit to OCI test container
+        shell: bash
+        env:
+          OCI_HOST: ${{ secrets.OCI_HOST }}
+          OCI_USER: ${{ secrets.OCI_USER }}
+          COMMIT_SHA: ${{ github.sha }}
+        run: |
+          ssh \
+            -i ~/.ssh/gsvai_oci_key \
+            "${OCI_USER}@${OCI_HOST}" \
+            "COMMIT_SHA=${COMMIT_SHA} bash -s" <<'REMOTE_SCRIPT'
+
+          set -e
+
+          cd ~/gsvai-enterprise-ai
+
+          echo "========================================"
+          echo "GSVAI CD TEST DEPLOYMENT"
+          echo "========================================"
+          echo "Commit: ${COMMIT_SHA}"
+
+          git fetch origin main
+          git checkout --force "${COMMIT_SHA}"
+
+          echo "Building Docker image..."
+
+          docker build \
+            -t "gsvai-backend:cd-${COMMIT_SHA}" \
+            -f backend/Dockerfile \
+            .
+
+          echo "Removing previous CD test container if present..."
+
+          docker rm -f gsvai-backend-cd-test 2>/dev/null || true
+
+          echo "Starting CD test container..."
+
+          docker run -d \
+            --name gsvai-backend-cd-test \
+            --env-file backend/.env \
+            -e GSVAI_ENV=production \
+            -e DB_WALLET_DIR=/app/backend/wallet \
+            -v "$(pwd)/backend/wallet:/app/backend/wallet:ro" \
+            -p 18001:8000 \
+            "gsvai-backend:cd-${COMMIT_SHA}"
+
+          echo "Waiting for application startup..."
+
+          for i in $(seq 1 30); do
+
+            if curl -fsS http://127.0.0.1:18001/health; then
+              echo
+              echo "========================================"
+              echo "CD TEST DEPLOYMENT PASSED"
+              echo "========================================"
+              exit 0
+            fi
+
+            sleep 2
+          done
+
+          echo "========================================"
+          echo "CD TEST DEPLOYMENT FAILED"
+          echo "========================================"
+
+          docker logs --tail 150 gsvai-backend-cd-test
+
+          exit 1
+
+          REMOTE_SCRIPT
