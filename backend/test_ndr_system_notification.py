@@ -285,7 +285,7 @@ class TestNDRSystemNotification(unittest.TestCase):
             "SUBJECT": "Undeliverable: RE: Urgent",
         }
 
-        with patch.object(service.email_service.repository, "get_email", return_value=fake_email):
+        with patch.object(service.email_service, "get_email_full", return_value=fake_email):
             with self.assertRaises(ValueError) as ctx:
                 service.approve_and_reply("EMAIL-NDR-TEST", "Here is a reply")
             self.assertIn("Outbound replies to system mailer-daemons are prohibited", str(ctx.exception))
