@@ -32,6 +32,14 @@ jobs:
         run: |
           python -m compileall -q backend
 
+      - name: Run NDR system notification tests
+        working-directory: backend
+        run: |
+          python -m unittest discover \
+            -s . \
+            -p "test_ndr_system_notification.py" \
+            -v
+
       - name: Build Docker image
         run: |
           docker build \
