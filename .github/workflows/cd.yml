@@ -38,10 +38,22 @@ jobs:
 
           cd ~/gsvai-enterprise-ai
 
+          IMAGE_TAG="gsvai-backend:cd-${COMMIT_SHA}"
+
+          cleanup() {
+            echo "Cleaning up CD test resources..."
+
+            docker rm -f gsvai-backend-cd-test 2>/dev/null || true
+            docker image rm "${IMAGE_TAG}" 2>/dev/null || true
+          }
+
+          trap cleanup EXIT
+
           echo "========================================"
           echo "GSVAI CD TEST DEPLOYMENT"
           echo "========================================"
           echo "Commit: ${COMMIT_SHA}"
+          echo "Image:  ${IMAGE_TAG}"
 
           git fetch origin main
           git checkout --force "${COMMIT_SHA}"
@@ -49,7 +61,7 @@ jobs:
           echo "Building Docker image..."
 
           docker build \
-            -t "gsvai-backend:cd-${COMMIT_SHA}" \
+            -t "${IMAGE_TAG}" \
             -f backend/Dockerfile \
             .
 
@@ -67,7 +79,7 @@ jobs:
             -v "$(pwd)/backend/wallet:/app/backend/wallet:ro" \
             -v "$(pwd)/gsvai-hf-cache:/root/.cache/huggingface" \
             -p 18001:8000 \
-            "gsvai-backend:cd-${COMMIT_SHA}"
+            "${IMAGE_TAG}"
 
           echo "Waiting for application startup..."
 

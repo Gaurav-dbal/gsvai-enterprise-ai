@@ -1,0 +1,243 @@
+name: GSVAI Production CD
+
+on:
+  workflow_dispatch:
+
+jobs:
+  deploy-production:
+    name: Test and Promote to OCI Production
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Configure SSH
+        shell: bash
+        env:
+          OCI_SSH_KEY: ${{ secrets.OCI_SSH_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+
+          printf '%s\n' "$OCI_SSH_KEY" > ~/.ssh/gsvai_oci_key
+          chmod 600 ~/.ssh/gsvai_oci_key
+
+          ssh-keyscan -H "${{ secrets.OCI_HOST }}" >> ~/.ssh/known_hosts
+
+      - name: Test and promote production
+        shell: bash
+        env:
+          OCI_HOST: ${{ secrets.OCI_HOST }}
+          OCI_USER: ${{ secrets.OCI_USER }}
+          COMMIT_SHA: ${{ github.sha }}
+        run: |
+          ssh \
+            -i ~/.ssh/gsvai_oci_key \
+            "${OCI_USER}@${OCI_HOST}" \
+            "COMMIT_SHA=${COMMIT_SHA} bash -s" <<'REMOTE_SCRIPT'
+
+          set -e
+
+          cd ~/gsvai-enterprise-ai
+
+          IMAGE_TAG="gsvai-backend:prod-${COMMIT_SHA}"
+          ROLLBACK_TAG="gsvai-backend:rollback-${COMMIT_SHA}"
+
+          echo "========================================"
+          echo "GSVAI PRODUCTION DEPLOYMENT"
+          echo "========================================"
+          echo "Commit: ${COMMIT_SHA}"
+          echo "Image:  ${IMAGE_TAG}"
+
+          echo "Checking disk space..."
+
+          df -h /
+
+          echo "Fetching exact commit..."
+
+          git fetch origin main
+          git checkout --force "${COMMIT_SHA}"
+
+          echo "Building production image..."
+
+          docker build \
+            -t "${IMAGE_TAG}" \
+            -f backend/Dockerfile \
+            .
+
+          echo "Removing previous production CD test container..."
+
+          docker rm -f gsvai-backend-cd-test 2>/dev/null || true
+
+          echo "Starting production deployment test..."
+
+          docker run -d \
+            --name gsvai-backend-cd-test \
+            --env-file backend/.env \
+            -e GSVAI_ENV=production \
+            -e DB_WALLET_DIR=/app/backend/wallet \
+            -v "$(pwd)/backend/wallet:/app/backend/wallet:ro" \
+            -v "$(pwd)/gsvai-hf-cache:/root/.cache/huggingface" \
+            -p 18001:8000 \
+            "${IMAGE_TAG}"
+
+          echo "Waiting for deployment test..."
+
+          TEST_PASSED=false
+
+          for i in $(seq 1 30); do
+
+            if curl -fsS http://127.0.0.1:18001/health; then
+              TEST_PASSED=true
+              break
+            fi
+
+            sleep 2
+
+          done
+
+          if [ "${TEST_PASSED}" != "true" ]; then
+
+            echo "========================================"
+            echo "PRODUCTION PRE-DEPLOYMENT TEST FAILED"
+            echo "========================================"
+
+            docker logs --tail 150 gsvai-backend-cd-test || true
+
+            docker rm -f gsvai-backend-cd-test 2>/dev/null || true
+            docker image rm "${IMAGE_TAG}" 2>/dev/null || true
+
+            exit 1
+
+          fi
+
+          echo
+          echo "========================================"
+          echo "PRE-DEPLOYMENT TEST PASSED"
+          echo "========================================"
+
+          echo "Removing test container..."
+
+          docker rm -f gsvai-backend-cd-test
+
+          echo "========================================"
+          echo "CREATING PRODUCTION ROLLBACK IMAGE"
+          echo "========================================"
+
+          CURRENT_IMAGE=$(docker inspect gsvai-backend \
+            --format '{{.Config.Image}}')
+
+          echo "Current production image: ${CURRENT_IMAGE}"
+
+          docker tag "${CURRENT_IMAGE}" "${ROLLBACK_TAG}"
+
+          echo "Rollback image created:"
+          echo "${ROLLBACK_TAG}"
+
+          echo "========================================"
+          echo "STOPPING CURRENT PRODUCTION"
+          echo "========================================"
+
+          docker rm -f gsvai-backend
+
+          echo "========================================"
+          echo "STARTING NEW PRODUCTION VERSION"
+          echo "========================================"
+
+          docker run -d \
+            --name gsvai-backend \
+            --env-file backend/.env \
+            -e GSVAI_ENV=production \
+            -e DB_WALLET_DIR=/app/backend/wallet \
+            -v "$(pwd)/backend/wallet:/app/backend/wallet:ro" \
+            -v "$(pwd)/gsvai-hf-cache:/root/.cache/huggingface" \
+            -p 8000:8000 \
+            "${IMAGE_TAG}"
+
+          echo "Waiting for production health check..."
+
+          PRODUCTION_HEALTHY=false
+
+          for i in $(seq 1 30); do
+
+            if curl -fsS http://127.0.0.1:8000/health; then
+              PRODUCTION_HEALTHY=true
+              break
+            fi
+
+            sleep 2
+
+          done
+
+          if [ "${PRODUCTION_HEALTHY}" != "true" ]; then
+
+            echo "========================================"
+            echo "PRODUCTION HEALTH CHECK FAILED"
+            echo "========================================"
+
+            docker logs --tail 200 gsvai-backend || true
+
+            echo "========================================"
+            echo "ROLLING BACK PRODUCTION"
+            echo "========================================"
+
+            docker rm -f gsvai-backend 2>/dev/null || true
+
+            docker run -d \
+              --name gsvai-backend \
+              --env-file backend/.env \
+              -e GSVAI_ENV=production \
+              -e DB_WALLET_DIR=/app/backend/wallet \
+              -v "$(pwd)/backend/wallet:/app/backend/wallet:ro" \
+              -v "$(pwd)/gsvai-hf-cache:/root/.cache/huggingface" \
+              -p 8000:8000 \
+              "${ROLLBACK_TAG}"
+
+            echo "Waiting for rollback health check..."
+
+            for i in $(seq 1 30); do
+
+              if curl -fsS http://127.0.0.1:8000/health; then
+
+                echo
+                echo "========================================"
+                echo "ROLLBACK SUCCESSFUL"
+                echo "========================================"
+
+                exit 1
+
+              fi
+
+              sleep 2
+
+            done
+
+            echo "========================================"
+            echo "CRITICAL: ROLLBACK HEALTH CHECK FAILED"
+            echo "========================================"
+
+            docker logs --tail 200 gsvai-backend || true
+
+            exit 1
+
+          fi
+
+          echo
+          echo "========================================"
+          echo "PRODUCTION DEPLOYMENT PASSED"
+          echo "========================================"
+
+          echo "Production image:"
+          docker inspect gsvai-backend \
+            --format '{{.Config.Image}}'
+
+          echo
+          echo "Production health:"
+          curl -fsS http://127.0.0.1:8000/health
+
+          echo
+          echo "========================================"
+          echo "GSVAI PRODUCTION DEPLOYMENT COMPLETE"
+          echo "========================================"
+
+          REMOTE_SCRIPT
