@@ -65,6 +65,7 @@ jobs:
             -e GSVAI_ENV=production \
             -e DB_WALLET_DIR=/app/backend/wallet \
             -v "$(pwd)/backend/wallet:/app/backend/wallet:ro" \
+            -v "$(pwd)/gsvai-hf-cache:/root/.cache/huggingface" \
             -p 18001:8000 \
             "gsvai-backend:cd-${COMMIT_SHA}"
 
