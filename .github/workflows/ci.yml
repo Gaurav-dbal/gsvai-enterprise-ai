@@ -42,6 +42,24 @@ jobs:
             -p "test_ndr_system_notification.py" \
             -v
 
+      - name: Run AI runtime configuration tests
+        working-directory: backend
+        env:
+          GROQ_API_KEY: "ci-test-key"
+          GROQ_MODEL: "openai/gpt-oss-20b"
+        run: |
+          python -m unittest \
+            test_ai_runtime_config.py \
+            -v
+
+      - name: Run invoice API tests
+        working-directory: backend
+        env:
+          GROQ_API_KEY: "ci-test-key"
+          GROQ_MODEL: "openai/gpt-oss-20b"
+        run: |
+          python test_invoice_endpoints.py
+
       - name: Build Docker image
         run: |
           docker build \
