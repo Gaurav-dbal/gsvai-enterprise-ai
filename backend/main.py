@@ -17,7 +17,7 @@ from pydantic import BaseModel
 import oracledb
 
 from services.rag_service import answer_question
-from services.ai_runtime_config import get_ai_runtime_config
+from services.ai_runtime_config import get_ai_runtime_config, get_ai_runtime_console_metadata
 from services.document_ingestion_service import ingest_pdf, ingest_document_pages
 from services.oci_document_understanding_service import (
     analyze_document_with_oci,
@@ -1260,19 +1260,19 @@ async def analyze_document_endpoint(
     Processing flow:
 
         React UI
-            ↓
+            Ã¢â€ â€œ
         FastAPI
-            ↓
+            Ã¢â€ â€œ
         Temporary PDF
-            ↓
+            Ã¢â€ â€œ
         OCI Object Storage
-            ↓
+            Ã¢â€ â€œ
         OCI Document Understanding
-            ↓
+            Ã¢â€ â€œ
         OCR
-            ↓
+            Ã¢â€ â€œ
         Normalized OCR response
-            ↓
+            Ã¢â€ â€œ
         React UI
     """
 
@@ -2118,3 +2118,486 @@ def get_dashboard_stats_api(period: str = "today"):
     Zero demo data or mock fallbacks.
     """
     return get_dashboard_overview(period=period)
+
+
+# =========================================================
+# AI Administration & Control Plane API (Settings)
+# =========================================================
+
+@app.get("/api/settings/ai-runtime")
+def get_ai_runtime_settings_api(
+    x_user_id: Optional[str] = Header(None, alias="X-User-Id"),
+    x_user_role: Optional[str] = Header(None, alias="X-User-Role"),
+):
+    """
+    Admin: Returns live, verified runtime configuration metadata for GSVAI Enterprise AI.
+    Includes Primary LLM (Groq), Fallback LLM (Ollama), Local Embeddings, and Oracle Vector Search.
+    Strictly read-only with zero secret values exposed.
+    """
+    user = get_current_user_context(x_user_id, x_user_role)
+    require_permission("AI_RUNTIME_VIEW")(user)
+    return get_ai_runtime_console_metadata()
+
+
+# =========================================================
+# AI Model Management API (Settings -> AI Models)
+# =========================================================
+
+class AIModelCreateRequest(BaseModel):
+    provider: str
+    model_name: str
+    model_type: Optional[str] = "LLM"
+    priority: Optional[int] = 1
+    enabled: Optional[bool] = True
+    is_primary: Optional[bool] = False
+    is_fallback: Optional[bool] = False
+    temperature: Optional[float] = 0.20
+    max_tokens: Optional[int] = 4096
+    description: Optional[str] = ""
+
+
+class AIModelUpdateRequest(BaseModel):
+    model_name: Optional[str] = None
+    priority: Optional[int] = None
+    enabled: Optional[bool] = None
+    is_primary: Optional[bool] = None
+    is_fallback: Optional[bool] = None
+    temperature: Optional[float] = None
+    max_tokens: Optional[int] = None
+    description: Optional[str] = None
+
+
+@app.get("/api/settings/ai-models")
+def get_ai_models_api(
+    x_user_id: Optional[str] = Header(None, alias="X-User-Id"),
+    x_user_role: Optional[str] = Header(None, alias="X-User-Role"),
+):
+    """
+    Admin: Lists all configured AI models from the persistent Oracle DB registry.
+    Enriched with live health status, primary/fallback flags, and current active runtime.
+    """
+    user = get_current_user_context(x_user_id, x_user_role)
+    require_permission("AI_MODEL_VIEW")(user)
+    from services.ai_model_service import get_ai_models
+    models = get_ai_models()
+    runtime_meta = get_ai_runtime_console_metadata()
+    return {
+        "models": models,
+        "current_runtime": runtime_meta.get("current_runtime", {}),
+    }
+
+
+@app.post("/api/settings/ai-models")
+def create_ai_model_api(
+    req: AIModelCreateRequest,
+    x_user_id: Optional[str] = Header(None, alias="X-User-Id"),
+    x_user_role: Optional[str] = Header(None, alias="X-User-Role"),
+):
+    """
+    Admin: Registers a new AI model in the persistent Oracle DB registry.
+    Validates provider, model name, priority, and exclusivity rules.
+    """
+    user = get_current_user_context(x_user_id, x_user_role)
+    require_permission("AI_MODEL_MANAGE")(user)
+    from services.ai_model_service import create_ai_model
+    try:
+        return create_ai_model(req.dict(), current_user_id=user["username"])
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+
+@app.put("/api/settings/ai-models/{model_id}")
+def update_ai_model_api(
+    model_id: int,
+    req: AIModelUpdateRequest,
+    x_user_id: Optional[str] = Header(None, alias="X-User-Id"),
+    x_user_role: Optional[str] = Header(None, alias="X-User-Role"),
+):
+    """
+    Admin: Updates configuration parameters for an existing AI model.
+    """
+    user = get_current_user_context(x_user_id, x_user_role)
+    require_permission("AI_MODEL_MANAGE")(user)
+    from services.ai_model_service import update_ai_model
+    try:
+        updates = {k: v for k, v in req.dict().items() if v is not None}
+        return update_ai_model(model_id, updates, current_user_id=user["username"])
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+
+@app.delete("/api/settings/ai-models/{model_id}")
+def delete_ai_model_api(
+    model_id: int,
+    x_user_id: Optional[str] = Header(None, alias="X-User-Id"),
+    x_user_role: Optional[str] = Header(None, alias="X-User-Role"),
+):
+    """
+    Admin: Deletes an AI model from the persistent registry.
+    Active primary and fallback models cannot be deleted.
+    """
+    user = get_current_user_context(x_user_id, x_user_role)
+    require_permission("AI_MODEL_MANAGE")(user)
+    from services.ai_model_service import delete_ai_model
+    try:
+        return delete_ai_model(model_id, current_user_id=user["username"])
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+
+@app.post("/api/settings/ai-models/{model_id}/enable")
+def enable_ai_model_api(
+    model_id: int,
+    x_user_id: Optional[str] = Header(None, alias="X-User-Id"),
+    x_user_role: Optional[str] = Header(None, alias="X-User-Role"),
+):
+    """Admin: Enables an existing AI model."""
+    user = get_current_user_context(x_user_id, x_user_role)
+    require_permission("AI_MODEL_MANAGE")(user)
+    from services.ai_model_service import enable_ai_model
+    try:
+        return enable_ai_model(model_id, current_user_id=user["username"])
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+
+@app.post("/api/settings/ai-models/{model_id}/disable")
+def disable_ai_model_api(
+    model_id: int,
+    x_user_id: Optional[str] = Header(None, alias="X-User-Id"),
+    x_user_role: Optional[str] = Header(None, alias="X-User-Role"),
+):
+    """Admin: Disables an existing AI model (forbids disabling active primary)."""
+    user = get_current_user_context(x_user_id, x_user_role)
+    require_permission("AI_MODEL_MANAGE")(user)
+    from services.ai_model_service import disable_ai_model
+    try:
+        return disable_ai_model(model_id, current_user_id=user["username"])
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+
+@app.post("/api/settings/ai-models/{model_id}/set-primary")
+def set_primary_ai_model_api(
+    model_id: int,
+    x_user_id: Optional[str] = Header(None, alias="X-User-Id"),
+    x_user_role: Optional[str] = Header(None, alias="X-User-Role"),
+):
+    """Admin: Designates the chosen model as the single active Primary LLM."""
+    user = get_current_user_context(x_user_id, x_user_role)
+    require_permission("AI_MODEL_MANAGE")(user)
+    from services.ai_model_service import set_primary_model
+    try:
+        return set_primary_model(model_id, current_user_id=user["username"])
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+
+@app.post("/api/settings/ai-models/{model_id}/set-fallback")
+def set_fallback_ai_model_api(
+    model_id: int,
+    x_user_id: Optional[str] = Header(None, alias="X-User-Id"),
+    x_user_role: Optional[str] = Header(None, alias="X-User-Role"),
+):
+    """Admin: Designates the chosen model as the single active Fallback LLM."""
+    user = get_current_user_context(x_user_id, x_user_role)
+    require_permission("AI_MODEL_MANAGE")(user)
+    from services.ai_model_service import set_fallback_model
+    try:
+        return set_fallback_model(model_id, current_user_id=user["username"])
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+
+@app.post("/api/settings/ai-models/{model_id}/test")
+def test_ai_model_api(
+    model_id: int,
+    x_user_id: Optional[str] = Header(None, alias="X-User-Id"),
+    x_user_role: Optional[str] = Header(None, alias="X-User-Role"),
+):
+    """Admin: Executes a live health and latency connectivity test against the model."""
+    user = get_current_user_context(x_user_id, x_user_role)
+    require_permission("AI_MODEL_TEST")(user)
+    from services.ai_model_service import test_ai_model
+    try:
+        return test_ai_model(model_id, current_user_id=user["username"])
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+
+# ============================================================
+# AI Settings: Module 1 Ã¢â‚¬â€ RAG & Knowledge Engine
+# ============================================================
+
+class RetrievalTestRequest(BaseModel):
+    query: str
+    top_k: Optional[int] = 5
+
+
+@app.get("/api/settings/rag-knowledge/stats")
+def get_rag_knowledge_stats_api(
+    x_user_id: Optional[str] = Header(None, alias="X-User-Id"),
+    x_user_role: Optional[str] = Header(None, alias="X-User-Role"),
+):
+    """Admin: Dynamically calculated RAG and Knowledge base statistics."""
+    user = get_current_user_context(x_user_id, x_user_role)
+    require_permission("RAG_KNOWLEDGE_VIEW")(user)
+    from services.rag_knowledge_service import get_rag_knowledge_stats
+    return get_rag_knowledge_stats()
+
+
+@app.get("/api/settings/rag-knowledge/health")
+def get_rag_knowledge_health_api(
+    x_user_id: Optional[str] = Header(None, alias="X-User-Id"),
+    x_user_role: Optional[str] = Header(None, alias="X-User-Role"),
+):
+    """Admin: Health evaluation for embedding engine and Oracle Vector Search."""
+    user = get_current_user_context(x_user_id, x_user_role)
+    require_permission("RAG_KNOWLEDGE_VIEW")(user)
+    from services.rag_knowledge_service import get_rag_knowledge_health
+    return get_rag_knowledge_health()
+
+
+@app.get("/api/settings/rag-knowledge/documents")
+def get_rag_knowledge_documents_api(
+    x_user_id: Optional[str] = Header(None, alias="X-User-Id"),
+    x_user_role: Optional[str] = Header(None, alias="X-User-Role"),
+):
+    """Admin: Document inventory in the enterprise knowledge base."""
+    user = get_current_user_context(x_user_id, x_user_role)
+    require_permission("RAG_KNOWLEDGE_VIEW")(user)
+    from services.rag_knowledge_service import get_rag_knowledge_documents
+    docs = get_rag_knowledge_documents()
+    return {"documents": docs, "total": len(docs)}
+
+
+@app.post("/api/settings/rag-knowledge/retrieval-test")
+@app.post("/api/settings/rag-knowledge/test-retrieval")
+def test_rag_retrieval_api(
+    req: RetrievalTestRequest,
+    x_user_id: Optional[str] = Header(None, alias="X-User-Id"),
+    x_user_role: Optional[str] = Header(None, alias="X-User-Role"),
+):
+    """Admin: Diagnostic semantic vector retrieval test without LLM invocation."""
+    user = get_current_user_context(x_user_id, x_user_role)
+    require_permission("RAG_KNOWLEDGE_TEST")(user)
+    from services.rag_knowledge_service import test_rag_retrieval
+    try:
+        return test_rag_retrieval(query=req.query, top_k=req.top_k or 5, user_id=user["username"])
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+
+@app.post("/api/settings/rag-knowledge/documents/{document_id}/reprocess")
+def reprocess_knowledge_document_api(
+    document_id: int,
+    x_user_id: Optional[str] = Header(None, alias="X-User-Id"),
+    x_user_role: Optional[str] = Header(None, alias="X-User-Role"),
+):
+    """Admin: Re-embed and re-index an existing knowledge document."""
+    user = get_current_user_context(x_user_id, x_user_role)
+    require_permission("RAG_KNOWLEDGE_MANAGE")(user)
+    from services.rag_knowledge_service import reprocess_knowledge_document
+    try:
+        return reprocess_knowledge_document(document_id, user_id=user["username"])
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+
+
+@app.delete("/api/settings/rag-knowledge/documents/{document_id}")
+def delete_knowledge_document_api(
+    document_id: int,
+    x_user_id: Optional[str] = Header(None, alias="X-User-Id"),
+    x_user_role: Optional[str] = Header(None, alias="X-User-Role"),
+):
+    """Admin: Safely delete a knowledge document and all vector chunks."""
+    user = get_current_user_context(x_user_id, x_user_role)
+    require_permission("RAG_KNOWLEDGE_MANAGE")(user)
+    from services.rag_knowledge_service import delete_knowledge_document
+    try:
+        return delete_knowledge_document(document_id, user_id=user["username"])
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+
+
+# ============================================================
+# AI Settings: Module 2 Ã¢â‚¬â€ AI Observability & Telemetry
+# ============================================================
+
+@app.get("/api/settings/ai-observability/summary")
+def get_ai_observability_summary_api(
+    x_user_id: Optional[str] = Header(None, alias="X-User-Id"),
+    x_user_role: Optional[str] = Header(None, alias="X-User-Role"),
+):
+    """Admin: Overview summary of AI requests, tokens, latencies, and fallbacks."""
+    user = get_current_user_context(x_user_id, x_user_role)
+    require_permission("AI_OBSERVABILITY_VIEW")(user)
+    from services.ai_observability_service import get_observability_summary
+    return get_observability_summary()
+
+
+@app.get("/api/settings/ai-observability/requests")
+def get_ai_observability_requests_api(
+    limit: int = 50,
+    provider: Optional[str] = None,
+    status_filter: Optional[str] = None,
+    x_user_id: Optional[str] = Header(None, alias="X-User-Id"),
+    x_user_role: Optional[str] = Header(None, alias="X-User-Role"),
+):
+    """Admin: List of recent AI requests with execution telemetry."""
+    user = get_current_user_context(x_user_id, x_user_role)
+    require_permission("AI_OBSERVABILITY_VIEW")(user)
+    from services.ai_observability_service import get_recent_requests
+    requests = get_recent_requests(limit=limit, provider=provider, status=status_filter)
+    return {"requests": requests, "total": len(requests)}
+
+
+@app.get("/api/settings/ai-observability/providers")
+def get_ai_observability_providers_api(
+    x_user_id: Optional[str] = Header(None, alias="X-User-Id"),
+    x_user_role: Optional[str] = Header(None, alias="X-User-Role"),
+):
+    """Admin: Breakdown of usage, tokens, and latency across Groq and Ollama."""
+    user = get_current_user_context(x_user_id, x_user_role)
+    require_permission("AI_OBSERVABILITY_VIEW")(user)
+    from services.ai_observability_service import get_provider_metrics
+    providers = get_provider_metrics()
+    return {"providers": providers, "total": len(providers)}
+
+
+@app.get("/api/settings/ai-observability/traces/{request_id}")
+def get_ai_observability_trace_api(
+    request_id: str,
+    x_user_id: Optional[str] = Header(None, alias="X-User-Id"),
+    x_user_role: Optional[str] = Header(None, alias="X-User-Role"),
+):
+    """Admin: Inspect detailed execution trace for an AI request."""
+    user = get_current_user_context(x_user_id, x_user_role)
+    require_permission("AI_OBSERVABILITY_TRACE")(user)
+    from services.ai_observability_service import get_request_trace
+    trace_res = get_request_trace(request_id, user_id=user["username"])
+    if not trace_res:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Trace for request {request_id} not found.")
+    return trace_res
+
+
+# ============================================================
+# AI Settings: Module 3 Ã¢â‚¬â€ AI Security & Guardrails
+# ============================================================
+
+class SecurityTestRequest(BaseModel):
+    control: Optional[str] = "prompt_injection"
+    payload: Optional[str] = None
+    input_text: Optional[str] = None
+
+
+@app.get("/api/settings/ai-security")
+@app.get("/api/settings/ai-security/overview")
+def get_ai_security_overview_api(
+    x_user_id: Optional[str] = Header(None, alias="X-User-Id"),
+    x_user_role: Optional[str] = Header(None, alias="X-User-Role"),
+):
+    """Admin: Overview of the 8 active enterprise guardrails and security metrics."""
+    user = get_current_user_context(x_user_id, x_user_role)
+    require_permission("AI_SECURITY_VIEW")(user)
+    from services.ai_security_console_service import get_ai_security_overview
+    return get_ai_security_overview()
+
+
+@app.get("/api/settings/ai-security/events")
+def get_ai_security_events_api(
+    limit: int = 50,
+    x_user_id: Optional[str] = Header(None, alias="X-User-Id"),
+    x_user_role: Optional[str] = Header(None, alias="X-User-Role"),
+):
+    """Admin: Recent security event log without exposing sensitive payloads."""
+    user = get_current_user_context(x_user_id, x_user_role)
+    require_permission("AI_SECURITY_VIEW")(user)
+    from services.ai_security_console_service import get_security_events
+    events = get_security_events(limit=limit)
+    return {"events": events}
+
+
+@app.post("/api/settings/ai-security/test")
+def test_ai_security_api(
+    req: SecurityTestRequest,
+    x_user_id: Optional[str] = Header(None, alias="X-User-Id"),
+    x_user_role: Optional[str] = Header(None, alias="X-User-Role"),
+):
+    """Admin: Deterministic diagnostic test against active security guardrails."""
+    user = get_current_user_context(x_user_id, x_user_role)
+    require_permission("AI_SECURITY_TEST")(user)
+    from services.ai_security_console_service import test_security_guardrail
+    try:
+        ctrl = req.control or "prompt_injection"
+        pld = req.payload or req.input_text or ""
+        return test_security_guardrail(control=ctrl, payload=pld, user_id=user["username"])
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+
+# ============================================================
+# AI Settings: Module 4 Ã¢â‚¬â€ AI Agents Control Center
+# ============================================================
+
+class AgentTestRequest(BaseModel):
+    test_payload: Optional[str] = None
+
+
+@app.get("/api/settings/ai-agents")
+def get_ai_agents_api(
+    x_user_id: Optional[str] = Header(None, alias="X-User-Id"),
+    x_user_role: Optional[str] = Header(None, alias="X-User-Role"),
+):
+    """Admin: Real inventory of confirmed enterprise AI agents and routing topology."""
+    user = get_current_user_context(x_user_id, x_user_role)
+    require_permission("AI_AGENT_VIEW")(user)
+    from services.ai_agent_console_service import get_ai_agents_inventory
+    agents = get_ai_agents_inventory()
+    return {"agents": agents, "total": len(agents)}
+
+
+@app.get("/api/settings/ai-agents/history")
+def get_ai_agents_history_api(
+    limit: int = 50,
+    x_user_id: Optional[str] = Header(None, alias="X-User-Id"),
+    x_user_role: Optional[str] = Header(None, alias="X-User-Role"),
+):
+    """Admin: Real execution history across enterprise agents."""
+    user = get_current_user_context(x_user_id, x_user_role)
+    require_permission("AI_AGENT_VIEW")(user)
+    from services.ai_agent_console_service import get_agents_execution_history
+    history = get_agents_execution_history(limit=limit)
+    return {"history": history, "total": len(history)}
+
+
+@app.get("/api/settings/ai-agents/{agent_id}")
+def get_ai_agent_detail_api(
+    agent_id: str,
+    x_user_id: Optional[str] = Header(None, alias="X-User-Id"),
+    x_user_role: Optional[str] = Header(None, alias="X-User-Role"),
+):
+    """Admin: Detailed routing, tools, and execution history for a specific agent."""
+    user = get_current_user_context(x_user_id, x_user_role)
+    require_permission("AI_AGENT_VIEW")(user)
+    from services.ai_agent_console_service import get_agent_detail
+    agent = get_agent_detail(agent_id)
+    if not agent:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Agent '{agent_id}' not found.")
+    if "route" not in agent:
+        agent["route"] = agent.get("routing_action", f"/api/agents/{agent_id}")
+    return agent
+
+
+@app.post("/api/settings/ai-agents/{agent_id}/test")
+def test_ai_agent_api(
+    agent_id: str,
+    req: AgentTestRequest,
+    x_user_id: Optional[str] = Header(None, alias="X-User-Id"),
+    x_user_role: Optional[str] = Header(None, alias="X-User-Role"),
+):
+    """Admin: Safe, read-only diagnostic check for an enterprise agent."""
+    user = get_current_user_context(x_user_id, x_user_role)
+    require_permission("AI_AGENT_TEST")(user)
+    from services.ai_agent_console_service import test_agent_safely
+    return test_agent_safely(agent_id=agent_id, test_payload=req.test_payload, user_id=user["username"])

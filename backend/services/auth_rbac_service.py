@@ -42,6 +42,29 @@ ALL_PERMISSIONS = {
 
     # Audit & Security
     "AUDIT_VIEW": "View system-wide activity, security, and submission audit logs",
+
+    # AI Administration & Control Plane
+    "AI_RUNTIME_VIEW": "View AI runtime configuration and live architecture",
+    "AI_MODEL_VIEW": "View configured AI models and persistent registry",
+    "AI_MODEL_MANAGE": "Add, edit, enable, disable, set primary or fallback AI models",
+    "AI_MODEL_TEST": "Execute connectivity and latency health tests on AI models",
+
+    # RAG & Knowledge Base Management
+    "RAG_KNOWLEDGE_VIEW": "View enterprise knowledge base documents, chunks, and vector health",
+    "RAG_KNOWLEDGE_MANAGE": "Reprocess or manage knowledge documents and embeddings",
+    "RAG_KNOWLEDGE_TEST": "Execute diagnostic semantic retrieval queries without LLM invocation",
+
+    # AI Observability & Telemetry
+    "AI_OBSERVABILITY_VIEW": "View real-time and historical AI request, token, and latency telemetry",
+    "AI_OBSERVABILITY_TRACE": "Inspect end-to-end execution traces and step-level breakdowns",
+
+    # AI Security & Guardrails
+    "AI_SECURITY_VIEW": "View active guardrails, risk levels, and security event metrics",
+    "AI_SECURITY_TEST": "Execute deterministic security tests against prompt and document guardrails",
+
+    # AI Agents Management & Control
+    "AI_AGENT_VIEW": "View configured enterprise AI agents, routing topology, and execution history",
+    "AI_AGENT_TEST": "Execute safe read-only diagnostics on enterprise AI agents",
 }
 
 
@@ -114,6 +137,9 @@ def get_user_by_id(user_identifier: str) -> Optional[Dict[str, Any]]:
                 perms = json.loads(perms_raw) if isinstance(perms_raw, str) else perms_raw
             except Exception:
                 perms = []
+
+        if row[4] == "ADMIN":
+            perms = list(dict.fromkeys(perms + list(ALL_PERMISSIONS.keys())))
 
         return {
             "user_id": row[0],
@@ -230,6 +256,8 @@ def get_roles() -> List[Dict[str, Any]]:
                     perms = json.loads(perms_raw) if isinstance(perms_raw, str) else perms_raw
                 except Exception:
                     perms = []
+            if row[0] == "ADMIN":
+                perms = list(dict.fromkeys(perms + list(ALL_PERMISSIONS.keys())))
             results.append({
                 "role_name": row[0],
                 "description": row[1],

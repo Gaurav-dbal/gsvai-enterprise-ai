@@ -257,12 +257,24 @@ def _generate_with_fallback(
             response
         )
 
+        prompt_tokens = 0
+        completion_tokens = 0
+        total_tokens = 0
+        usage = getattr(response, "usage", None)
+        if usage:
+            prompt_tokens = getattr(usage, "prompt_tokens", 0) or 0
+            completion_tokens = getattr(usage, "completion_tokens", 0) or 0
+            total_tokens = getattr(usage, "total_tokens", 0) or (prompt_tokens + completion_tokens)
+
         _last_llm_runtime.update(
             {
                 "provider": "Groq",
                 "model": MODEL_ID,
                 "fallback": False,
                 "fallback_reason": None,
+                "prompt_tokens": prompt_tokens,
+                "completion_tokens": completion_tokens,
+                "total_tokens": total_tokens,
             }
         )
 
@@ -302,19 +314,29 @@ def _generate_with_fallback(
         # ----------------------------------------------------
 
         if fallback_type == "rag":
-
-            return (
-                ollama_llm_service.generate_answer(
-                    question=question,
-                    context=context,
-                )
+            fallback_res = ollama_llm_service.generate_answer(
+                question=question,
+                context=context,
             )
-
-        return (
-            ollama_llm_service.generate_general_answer(
+        else:
+            fallback_res = ollama_llm_service.generate_general_answer(
                 question=question,
             )
+
+        ollama_info = ollama_llm_service.get_runtime_info()
+        _last_llm_runtime.update(
+            {
+                "provider": "Ollama",
+                "model": ollama_llm_service.OLLAMA_MODEL,
+                "fallback": True,
+                "fallback_reason": str(groq_error),
+                "prompt_tokens": ollama_info.get("prompt_tokens", 0),
+                "completion_tokens": ollama_info.get("completion_tokens", 0),
+                "total_tokens": ollama_info.get("total_tokens", 0),
+            }
         )
+
+        return fallback_res
 
 
 # ============================================================

@@ -44,19 +44,32 @@ OCI_DOCUMENT_BUCKET = os.getenv(
 # OCI Clients
 # =========================================================
 
-object_storage_client = (
-    oci.object_storage.ObjectStorageClient(
-        config,
-        signer=signer
+if signer is not None:
+    object_storage_client = (
+        oci.object_storage.ObjectStorageClient(
+            config,
+            signer=signer
+        )
     )
-)
 
-document_client = (
-    oci.ai_document.AIServiceDocumentClient(
-        config,
-        signer=signer
+    document_client = (
+        oci.ai_document.AIServiceDocumentClient(
+            config,
+            signer=signer
+        )
     )
-)
+else:
+    object_storage_client = (
+        oci.object_storage.ObjectStorageClient(
+            config
+        )
+    )
+
+    document_client = (
+        oci.ai_document.AIServiceDocumentClient(
+            config
+        )
+    )
 
 
 # =========================================================

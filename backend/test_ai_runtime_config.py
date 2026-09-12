@@ -9,6 +9,7 @@ from services.ai_runtime_config import (
     get_ai_runtime_config,
     format_rate_limit_error,
     get_llm_runtime_health,
+    get_ai_runtime_console_metadata,
 )
 
 
@@ -166,6 +167,77 @@ class TestAIRuntimeConfig(unittest.TestCase):
         )
         self.assertEqual(health["status"], "operational")
         self.assertEqual(health["label"], "Connected")
+
+    def test_ai_runtime_console_metadata_structure(self):
+        with patch.dict(
+            os.environ,
+            {
+                "GROQ_API_KEY": "ci-test-key",
+                "GROQ_MODEL": "openai/gpt-oss-20b",
+                "OLLAMA_BASE_URL": "http://localhost:11434",
+                "OLLAMA_MODEL": "qwen3:0.6b",
+            },
+            clear=False,
+        ):
+            meta = get_ai_runtime_console_metadata()
+
+        # Primary LLM checks
+        self.assertIn("primary", meta)
+        self.assertEqual(meta["primary"]["provider"], "Groq")
+        self.assertEqual(meta["primary"]["model"], "openai/gpt-oss-20b")
+        self.assertEqual(meta["primary"]["status"], "Active")
+        self.assertTrue(meta["primary"]["enabled"])
+        self.assertEqual(meta["primary"]["runtime"], "API")
+
+        # Fallback LLM checks
+        self.assertIn("fallback", meta)
+        self.assertEqual(meta["fallback"]["provider"], "Ollama")
+        self.assertEqual(meta["fallback"]["model"], "qwen3:0.6b")
+        self.assertIn(meta["fallback"]["status"], ["Available", "Unavailable"])
+        self.assertTrue(meta["fallback"]["enabled"])
+        self.assertEqual(meta["fallback"]["runtime"], "LOCAL")
+
+        # Embedding Engine checks
+        self.assertIn("embedding", meta)
+        self.assertEqual(meta["embedding"]["provider"], "Local Sentence Transformers")
+        self.assertEqual(meta["embedding"]["model"], "BAAI/bge-large-en-v1.5")
+        self.assertEqual(meta["embedding"]["dimensions"], 1024)
+        self.assertEqual(meta["embedding"]["status"], "Active")
+
+        # Vector Search checks
+        self.assertIn("vector_search", meta)
+        self.assertEqual(meta["vector_search"]["provider"], "Oracle AI Vector Search")
+        self.assertEqual(meta["vector_search"]["table"], "GSVAI_DOCUMENT_CHUNKS")
+        self.assertEqual(meta["vector_search"]["dimensions"], 1024)
+        self.assertEqual(meta["vector_search"]["distance_metric"], "COSINE")
+
+        # Current Runtime checks
+        self.assertIn("current_runtime", meta)
+        self.assertIn("provider", meta["current_runtime"])
+        self.assertIn("model", meta["current_runtime"])
+        self.assertIn("fallback", meta["current_runtime"])
+        self.assertIn("primary_provider", meta["current_runtime"])
+        self.assertIn("primary_model", meta["current_runtime"])
+
+    def test_ai_runtime_console_metadata_no_secrets_exposed(self):
+        with patch.dict(
+            os.environ,
+            {
+                "GROQ_API_KEY": "super-secret-groq-key-12345",
+                "DB_PASSWORD": "super-secret-db-pass-67890",
+            },
+            clear=False,
+        ):
+            meta = get_ai_runtime_console_metadata()
+
+        import json
+        serialized = json.dumps(meta)
+
+        self.assertNotIn("super-secret-groq-key-12345", serialized)
+        self.assertNotIn("super-secret-db-pass-67890", serialized)
+        self.assertNotIn("GROQ_API_KEY", serialized)
+        self.assertNotIn("DB_PASSWORD", serialized)
+        self.assertNotIn("password", serialized.lower())
 
 
 if __name__ == "__main__":

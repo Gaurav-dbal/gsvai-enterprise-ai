@@ -25,6 +25,13 @@ OLLAMA_GENERATE_URL = (
 )
 
 
+_last_ollama_runtime = {
+    "prompt_tokens": 0,
+    "completion_tokens": 0,
+    "total_tokens": 0,
+}
+
+
 def _generate(
     system_prompt: str,
     user_prompt: str,
@@ -55,6 +62,14 @@ def _generate(
     response.raise_for_status()
 
     data = response.json()
+
+    p_tokens = data.get("prompt_eval_count", 0) or 0
+    c_tokens = data.get("eval_count", 0) or 0
+    _last_ollama_runtime.update({
+        "prompt_tokens": p_tokens,
+        "completion_tokens": c_tokens,
+        "total_tokens": p_tokens + c_tokens,
+    })
 
     text = data.get("response")
 
@@ -174,4 +189,7 @@ def get_runtime_info() -> dict:
         "endpoint": OLLAMA_BASE_URL,
         "local": True,
         "configured": True,
+        "prompt_tokens": _last_ollama_runtime.get("prompt_tokens", 0),
+        "completion_tokens": _last_ollama_runtime.get("completion_tokens", 0),
+        "total_tokens": _last_ollama_runtime.get("total_tokens", 0),
     }

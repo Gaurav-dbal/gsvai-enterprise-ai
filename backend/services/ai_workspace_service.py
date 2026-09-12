@@ -2,6 +2,8 @@ import os
 import re
 import time
 import datetime
+import html
+import uuid
 from typing import Any, Dict, List, Optional
 
 # pyrefly: ignore [missing-import]
@@ -328,6 +330,55 @@ def process_workspace_document(file_path: str, filename: Optional[str] = None) -
 
 
 # =========================================================
+# AI Workspace Summary Output Formatting
+# =========================================================
+
+def _clean_document_summary_output(answer: str) -> str:
+    """
+    Normalize LLM-generated document summaries for consistent UI rendering.
+
+    The LLM is instructed to return plain text, but this defensive formatter
+    also removes accidental HTML/Markdown presentation artifacts so the
+    frontend receives readable enterprise summary text.
+    """
+    if not answer:
+        return ""
+
+    text = html.unescape(str(answer))
+
+    # Convert common HTML block/list elements before removing tags.
+    text = re.sub(r"(?i)<\s*br\s*/?\s*>", "\n", text)
+    text = re.sub(r"(?i)<\s*/?\s*(p|div|section|article|h[1-6])\s*>", "\n", text)
+    text = re.sub(r"(?i)<\s*li\s*>", "\n• ", text)
+    text = re.sub(r"(?i)<\s*/\s*li\s*>", "\n", text)
+    text = re.sub(r"(?i)<\s*(ul|ol)\s*>", "\n", text)
+    text = re.sub(r"(?i)<\s*/\s*(ul|ol)\s*>", "\n", text)
+
+    # Remove any remaining HTML tags.
+    text = re.sub(r"<[^>]+>", "", text)
+
+    # Normalize common Markdown bullets into one consistent bullet style.
+    text = re.sub(r"(?m)^\s*[-*]\s+", "• ", text)
+    text = re.sub(r"(?m)^\s*\+\s+", "• ", text)
+
+    # Remove heading markers while retaining the heading text.
+    text = re.sub(r"(?m)^\s{0,3}#{1,6}\s+", "", text)
+
+    # Remove emphasis markers around plain-text headings/content.
+    text = re.sub(r"\*\*(.*?)\*\*", r"\1", text)
+    text = re.sub(r"__(.*?)__", r"\1", text)
+
+    # Clean whitespace without destroying paragraph/section separation.
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    text = re.sub(r"[ \t]+\n", "\n", text)
+    text = re.sub(r"\n[ \t]+", "\n", text)
+    text = re.sub(r"[ \t]{2,}", " ", text)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+
+    return text.strip()
+
+
+# =========================================================
 # Date-Based Document Summary
 # =========================================================
 
@@ -559,9 +610,25 @@ You are GSVAI, an enterprise AI assistant.
 
 The user is requesting a summary of documents uploaded {timeframe_label}.
 
-Based on the uploaded document records below, provide a comprehensive, structured summary:
-1. List each document uploaded {timeframe_label} with its page count and key topics.
-2. Provide a high-level executive summary of their contents.
+Based only on the uploaded document records below, provide a clear enterprise-ready summary.
+
+OUTPUT FORMAT:
+DOCUMENTS
+• For each document: document name, page count, and key topics.
+
+EXECUTIVE SUMMARY
+• Concise overview of the most important information across the documents.
+
+KEY HIGHLIGHTS
+• Important facts, milestones, decisions, risks, or actions explicitly supported by the document content.
+
+RULES:
+- Use plain text only.
+- Use short headings and bullet points.
+- Keep paragraphs short and readable.
+- Do NOT use HTML, <br>, tables, XML, or HTML tags.
+- Do NOT return Markdown heading markers such as # or ##.
+- Do not invent information that is not present in the supplied document context.
 
 Uploaded Documents Context:
 ---------------------------
@@ -592,6 +659,7 @@ Summary Response:
             return context_security_result
 
         answer = generate_general_answer(prompt)
+        answer = _clean_document_summary_output(answer)
         llm_duration_ms = (time.perf_counter() - t_llm_start) * 1000
 
         if tracer:
@@ -614,7 +682,9 @@ Summary Response:
                 explanation="Structured executive summary generated successfully.",
                 details={
                     "status": "COMPLETED",
-                    "answer_length_chars": len(answer)
+                    "answer_length_chars": len(answer),
+                    "output_format": "PLAIN_TEXT_STRUCTURED",
+                    "html_normalization": "APPLIED"
                 }
             )
             tracer.add_step(
@@ -764,12 +834,26 @@ def handle_document_summary(
         prompt = f"""
 You are GSVAI, an enterprise AI assistant.
 
-Provide a clear, structured, and comprehensive executive summary of the document '{doc_name}'.
+Provide a clear, structured, comprehensive executive summary of the document '{doc_name}'.
 
-Include:
-- Key Purpose & Overview
-- Core Sections / Topics Covered
-- Important Highlights & Milestones
+OUTPUT FORMAT:
+KEY PURPOSE & OVERVIEW
+• Briefly explain the document's purpose and what it covers.
+
+CORE SECTIONS / TOPICS COVERED
+• List the major sections, subjects, processes, or themes explicitly present.
+
+IMPORTANT HIGHLIGHTS & MILESTONES
+• List the most important facts, milestones, decisions, risks, controls, or actions explicitly supported by the document.
+
+RULES:
+- Use plain text only.
+- Use short section headings and bullet points.
+- Keep each bullet concise and readable.
+- Use blank lines between major sections.
+- Do NOT use HTML, <br>, tables, XML, or HTML tags.
+- Do NOT return Markdown heading markers such as # or ##.
+- Do not invent or infer facts that are not supported by the document excerpts.
 
 Document Excerpts:
 ------------------
@@ -780,6 +864,7 @@ Executive Summary:
 """
         t_llm_start = time.perf_counter()
         answer = generate_general_answer(prompt)
+        answer = _clean_document_summary_output(answer)
         llm_duration_ms = (time.perf_counter() - t_llm_start) * 1000
 
         if tracer:
@@ -802,7 +887,9 @@ Executive Summary:
                 explanation="Executive summary generated and formatted.",
                 details={
                     "status": "COMPLETED",
-                    "answer_length_chars": len(answer)
+                    "answer_length_chars": len(answer),
+                    "output_format": "PLAIN_TEXT_STRUCTURED",
+                    "html_normalization": "APPLIED"
                 }
             )
             tracer.add_step(
@@ -913,7 +1000,7 @@ def _check_rag_context_security(
 # AI Workspace Unified Chat Routing
 # =========================================================
 
-def query_ai_workspace(
+def _query_ai_workspace_internal(
     question: str,
     document_id: Optional[int] = None,
     scope: Optional[str] = "all",
@@ -1596,3 +1683,80 @@ def query_ai_workspace(
         "sources": [],
         "trace": tracer.to_dict()
     }
+
+
+def _persist_observability_record(result: Dict[str, Any]) -> None:
+    """Safely persists request telemetry into GSVAI_AI_OBSERVABILITY."""
+    try:
+        from services.ai_observability_service import record_ai_request
+        from services.oci_llm_service import get_runtime_info as get_llm_runtime_info
+
+        runtime_info = get_llm_runtime_info()
+        curr_runtime = runtime_info.get("current_runtime", {})
+        provider = curr_runtime.get("provider", "Groq")
+        model = curr_runtime.get("model", "openai/gpt-oss-20b")
+        fallback = bool(curr_runtime.get("fallback", False))
+        fallback_reason = curr_runtime.get("fallback_reason")
+        prompt_tokens = int(curr_runtime.get("prompt_tokens", 0) or 0)
+        completion_tokens = int(curr_runtime.get("completion_tokens", 0) or 0)
+        total_tokens = int(curr_runtime.get("total_tokens", 0) or (prompt_tokens + completion_tokens))
+
+        trace_dict = result.get("trace")
+        status = "SUCCESS"
+        if result.get("source_type") == "security_blocked":
+            status = "BLOCKED"
+        elif "error" in str(result.get("source_type", "")).lower():
+            status = "FAILED"
+
+        route = trace_dict.get("route", "GENERAL_AI") if trace_dict else "GENERAL_AI"
+        rag_used = bool(trace_dict.get("rag_used", False)) if trace_dict else False
+        latency_ms = float(trace_dict.get("total_duration_ms", 0.0)) if trace_dict else 0.0
+
+        sources = result.get("sources", [])
+        retrieval_count = len(sources) if isinstance(sources, list) else 0
+        citation_count = len(sources) if isinstance(sources, list) else 0
+        req_id = f"req_{uuid.uuid4().hex[:16]}"
+
+        record_ai_request(
+            request_id=req_id,
+            provider=provider,
+            model=model,
+            serving_mode="FALLBACK" if fallback else "PRIMARY",
+            input_tokens=prompt_tokens,
+            output_tokens=completion_tokens,
+            total_tokens=total_tokens,
+            latency_ms=latency_ms,
+            status=status,
+            fallback=fallback,
+            fallback_reason=fallback_reason,
+            rag_used=rag_used,
+            retrieval_latency_ms=0.0,
+            retrieval_count=retrieval_count,
+            citation_count=citation_count,
+            route=route,
+            trace=trace_dict,
+        )
+    except Exception as e:
+        print(f"Warning: Failed to persist request observability: {e}")
+
+
+def query_ai_workspace(
+    question: str,
+    document_id: Optional[int] = None,
+    scope: Optional[str] = "all",
+    query_mode: Optional[str] = None,
+    top_k: int = 5
+) -> Dict[str, Any]:
+    """
+    Public entry point for unified AI Workspace chat.
+    Executes internal routing and records persistent observability telemetry.
+    """
+    res = _query_ai_workspace_internal(
+        question=question,
+        document_id=document_id,
+        scope=scope,
+        query_mode=query_mode,
+        top_k=top_k
+    )
+    _persist_observability_record(res)
+    return res

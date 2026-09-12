@@ -1301,3 +1301,475 @@ export async function rejectEmail(emailId, reason = "Sent to manual review") {
 
   return await response.json();
 }
+
+/**
+ * Admin: Get live AI runtime configuration metadata
+ * GET /api/settings/ai-runtime
+ */
+export async function getAIRuntimeConfig() {
+  const baseUrl = getApiBaseUrl();
+  const response = await fetch(`${baseUrl}/api/settings/ai-runtime`, {
+    method: "GET",
+    headers: { "Content-Type": "application/json" },
+  });
+  if (!response.ok) {
+    let msg = `Failed to load AI runtime configuration (${response.status})`;
+    try {
+      const err = await response.json();
+      if (err.detail) msg = err.detail;
+    } catch {}
+    throw new Error(msg);
+  }
+  return await response.json();
+}
+
+/**
+ * Admin: Get all configured AI models and current active runtime
+ * GET /api/settings/ai-models
+ */
+export async function getAIModels() {
+  const baseUrl = getApiBaseUrl();
+  const response = await fetch(`${baseUrl}/api/settings/ai-models`, {
+    method: "GET",
+    headers: { "Content-Type": "application/json" },
+  });
+  if (!response.ok) {
+    let msg = `Failed to load AI models (${response.status})`;
+    try {
+      const err = await response.json();
+      if (err.detail) msg = err.detail;
+    } catch {}
+    throw new Error(msg);
+  }
+  return await response.json();
+}
+
+/**
+ * Admin: Create a new AI model in persistent registry
+ * POST /api/settings/ai-models
+ */
+export async function createAIModel(modelData) {
+  const baseUrl = getApiBaseUrl();
+  const response = await fetch(`${baseUrl}/api/settings/ai-models`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(modelData),
+  });
+  if (!response.ok) {
+    let msg = `Failed to create AI model (${response.status})`;
+    try {
+      const err = await response.json();
+      if (err.detail) msg = err.detail;
+    } catch {}
+    throw new Error(msg);
+  }
+  return await response.json();
+}
+
+/**
+ * Admin: Update an existing AI model
+ * PUT /api/settings/ai-models/{model_id}
+ */
+export async function updateAIModel(modelId, updates) {
+  const baseUrl = getApiBaseUrl();
+  const response = await fetch(`${baseUrl}/api/settings/ai-models/${modelId}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(updates),
+  });
+  if (!response.ok) {
+    let msg = `Failed to update AI model (${response.status})`;
+    try {
+      const err = await response.json();
+      if (err.detail) msg = err.detail;
+    } catch {}
+    throw new Error(msg);
+  }
+  return await response.json();
+}
+
+/**
+ * Admin: Delete an existing AI model
+ * DELETE /api/settings/ai-models/{model_id}
+ */
+export async function deleteAIModel(modelId) {
+  const baseUrl = getApiBaseUrl();
+  const response = await fetch(`${baseUrl}/api/settings/ai-models/${modelId}`, {
+    method: "DELETE",
+    headers: { "Content-Type": "application/json" },
+  });
+  if (!response.ok) {
+    let msg = `Failed to delete AI model (${response.status})`;
+    try {
+      const err = await response.json();
+      if (err.detail) msg = err.detail;
+    } catch {}
+    throw new Error(msg);
+  }
+  return await response.json();
+}
+
+/**
+ * Admin: Enable an AI model
+ * POST /api/settings/ai-models/{model_id}/enable
+ */
+export async function enableAIModel(modelId) {
+  const baseUrl = getApiBaseUrl();
+  const response = await fetch(`${baseUrl}/api/settings/ai-models/${modelId}/enable`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+  });
+  if (!response.ok) {
+    let msg = `Failed to enable AI model (${response.status})`;
+    try {
+      const err = await response.json();
+      if (err.detail) msg = err.detail;
+    } catch {}
+    throw new Error(msg);
+  }
+  return await response.json();
+}
+
+/**
+ * Admin: Disable an AI model
+ * POST /api/settings/ai-models/{model_id}/disable
+ */
+export async function disableAIModel(modelId) {
+  const baseUrl = getApiBaseUrl();
+  const response = await fetch(`${baseUrl}/api/settings/ai-models/${modelId}/disable`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+  });
+  if (!response.ok) {
+    let msg = `Failed to disable AI model (${response.status})`;
+    try {
+      const err = await response.json();
+      if (err.detail) msg = err.detail;
+    } catch {}
+    throw new Error(msg);
+  }
+  return await response.json();
+}
+
+/**
+ * Admin: Set model as Primary LLM
+ * POST /api/settings/ai-models/{model_id}/set-primary
+ */
+export async function setPrimaryAIModel(modelId) {
+  const baseUrl = getApiBaseUrl();
+  const response = await fetch(`${baseUrl}/api/settings/ai-models/${modelId}/set-primary`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+  });
+  if (!response.ok) {
+    let msg = `Failed to set primary model (${response.status})`;
+    try {
+      const err = await response.json();
+      if (err.detail) msg = err.detail;
+    } catch {}
+    throw new Error(msg);
+  }
+  return await response.json();
+}
+
+/**
+ * Admin: Set model as Fallback LLM
+ * POST /api/settings/ai-models/{model_id}/set-fallback
+ */
+export async function setFallbackAIModel(modelId) {
+  const baseUrl = getApiBaseUrl();
+  const response = await fetch(`${baseUrl}/api/settings/ai-models/${modelId}/set-fallback`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+  });
+  if (!response.ok) {
+    let msg = `Failed to set fallback model (${response.status})`;
+    try {
+      const err = await response.json();
+      if (err.detail) msg = err.detail;
+    } catch {}
+    throw new Error(msg);
+  }
+  return await response.json();
+}
+
+/**
+ * Admin: Test model connectivity and latency
+ * POST /api/settings/ai-models/{model_id}/test
+ */
+export async function testAIModel(modelId) {
+  const baseUrl = getApiBaseUrl();
+  const response = await fetch(`${baseUrl}/api/settings/ai-models/${modelId}/test`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+  });
+  if (!response.ok) {
+    let msg = `Failed to test AI model (${response.status})`;
+    try {
+      const err = await response.json();
+      if (err.detail) msg = err.detail;
+    } catch {}
+    throw new Error(msg);
+  }
+  return await response.json();
+}
+
+// ============================================================
+// Phase 3: RAG & Knowledge Base
+// ============================================================
+
+export async function getRagKnowledgeStats() {
+  const baseUrl = getApiBaseUrl();
+  const response = await fetch(`${baseUrl}/api/settings/rag-knowledge/stats`, {
+    method: "GET",
+    headers: { "Content-Type": "application/json" },
+  });
+  if (!response.ok) throw new Error(`Failed to load RAG stats (${response.status})`);
+  return await response.json();
+}
+
+export async function getRagKnowledgeHealth() {
+  const baseUrl = getApiBaseUrl();
+  const response = await fetch(`${baseUrl}/api/settings/rag-knowledge/health`, {
+    method: "GET",
+    headers: { "Content-Type": "application/json" },
+  });
+  if (!response.ok) throw new Error(`Failed to check RAG health (${response.status})`);
+  return await response.json();
+}
+
+export async function getRagKnowledgeDocuments() {
+  const baseUrl = getApiBaseUrl();
+  const response = await fetch(`${baseUrl}/api/settings/rag-knowledge/documents`, {
+    method: "GET",
+    headers: { "Content-Type": "application/json" },
+  });
+  if (!response.ok) throw new Error(`Failed to load knowledge documents (${response.status})`);
+  return await response.json();
+}
+
+export async function testRagRetrieval(queryOrObj, topK = 5) {
+  const baseUrl = getApiBaseUrl();
+  let payload = {};
+  if (typeof queryOrObj === "object" && queryOrObj !== null) {
+    payload = {
+      query: queryOrObj.query || "",
+      top_k: queryOrObj.top_k || topK,
+    };
+  } else {
+    payload = {
+      query: queryOrObj,
+      top_k: topK,
+    };
+  }
+  const response = await fetch(`${baseUrl}/api/settings/rag-knowledge/retrieval-test`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) {
+    let msg = `Retrieval test failed (${response.status})`;
+    try {
+      const err = await response.json();
+      if (err.detail) msg = err.detail;
+    } catch {}
+    throw new Error(msg);
+  }
+  return await response.json();
+}
+
+export async function reprocessKnowledgeDocument(documentId) {
+  const baseUrl = getApiBaseUrl();
+  const response = await fetch(`${baseUrl}/api/settings/rag-knowledge/documents/${documentId}/reprocess`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+  });
+  if (!response.ok) {
+    let msg = `Reprocess failed (${response.status})`;
+    try {
+      const err = await response.json();
+      if (err.detail) msg = err.detail;
+    } catch {}
+    throw new Error(msg);
+  }
+  return await response.json();
+}
+
+export async function deleteKnowledgeDocument(documentId) {
+  const baseUrl = getApiBaseUrl();
+  const response = await fetch(`${baseUrl}/api/settings/rag-knowledge/documents/${documentId}`, {
+    method: "DELETE",
+    headers: { "Content-Type": "application/json" },
+  });
+  if (!response.ok) {
+    let msg = `Delete failed (${response.status})`;
+    try {
+      const err = await response.json();
+      if (err.detail) msg = err.detail;
+    } catch {}
+    throw new Error(msg);
+  }
+  return await response.json();
+}
+
+// ============================================================
+// Phase 4: AI Observability & Telemetry
+// ============================================================
+
+export async function getAIObservabilitySummary() {
+  const baseUrl = getApiBaseUrl();
+  const response = await fetch(`${baseUrl}/api/settings/ai-observability/summary`, {
+    method: "GET",
+    headers: { "Content-Type": "application/json" },
+  });
+  if (!response.ok) throw new Error(`Failed to load observability summary (${response.status})`);
+  return await response.json();
+}
+
+export async function getAIObservabilityRequests(limit = 50, provider = null, status = null) {
+  const baseUrl = getApiBaseUrl();
+  const params = new URLSearchParams({ limit });
+  if (provider && provider !== "ALL") params.append("provider", provider);
+  if (status && status !== "ALL") params.append("status_filter", status);
+
+  const response = await fetch(`${baseUrl}/api/settings/ai-observability/requests?${params.toString()}`, {
+    method: "GET",
+    headers: { "Content-Type": "application/json" },
+  });
+  if (!response.ok) throw new Error(`Failed to load requests (${response.status})`);
+  return await response.json();
+}
+
+export async function getAIObservabilityProviders() {
+  const baseUrl = getApiBaseUrl();
+  const response = await fetch(`${baseUrl}/api/settings/ai-observability/providers`, {
+    method: "GET",
+    headers: { "Content-Type": "application/json" },
+  });
+  if (!response.ok) throw new Error(`Failed to load provider metrics (${response.status})`);
+  return await response.json();
+}
+
+export async function getAIObservabilityTrace(requestId) {
+  const baseUrl = getApiBaseUrl();
+  const response = await fetch(`${baseUrl}/api/settings/ai-observability/traces/${requestId}`, {
+    method: "GET",
+    headers: { "Content-Type": "application/json" },
+  });
+  if (!response.ok) throw new Error(`Failed to load trace (${response.status})`);
+  return await response.json();
+}
+
+// ============================================================
+// Phase 5: AI Security & Guardrails
+// ============================================================
+
+export async function getAISecurityOverview() {
+  const baseUrl = getApiBaseUrl();
+  const response = await fetch(`${baseUrl}/api/settings/ai-security`, {
+    method: "GET",
+    headers: { "Content-Type": "application/json" },
+  });
+  if (!response.ok) throw new Error(`Failed to load security overview (${response.status})`);
+  return await response.json();
+}
+
+export async function getAISecurityEvents(limit = 50) {
+  const baseUrl = getApiBaseUrl();
+  const response = await fetch(`${baseUrl}/api/settings/ai-security/events?limit=${limit}`, {
+    method: "GET",
+    headers: { "Content-Type": "application/json" },
+  });
+  if (!response.ok) throw new Error(`Failed to load security events (${response.status})`);
+  return await response.json();
+}
+
+export async function testAISecurity(controlOrObj, payload) {
+  const baseUrl = getApiBaseUrl();
+  let body = {};
+  if (typeof controlOrObj === "object" && controlOrObj !== null) {
+    body = {
+      control: controlOrObj.control || "prompt_injection",
+      payload: controlOrObj.payload || controlOrObj.input_text || "",
+      input_text: controlOrObj.input_text || controlOrObj.payload || "",
+    };
+  } else {
+    body = {
+      control: controlOrObj || "prompt_injection",
+      payload: payload || "",
+      input_text: payload || "",
+    };
+  }
+  const response = await fetch(`${baseUrl}/api/settings/ai-security/test`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!response.ok) {
+    let msg = `Security test failed (${response.status})`;
+    try {
+      const err = await response.json();
+      if (err.detail) msg = err.detail;
+    } catch {}
+    throw new Error(msg);
+  }
+  return await response.json();
+}
+
+// ============================================================
+// Phase 6: AI Agents Control Center
+// ============================================================
+
+export async function getAIAgents() {
+  const baseUrl = getApiBaseUrl();
+  const response = await fetch(`${baseUrl}/api/settings/ai-agents`, {
+    method: "GET",
+    headers: { "Content-Type": "application/json" },
+  });
+  if (!response.ok) throw new Error(`Failed to load AI agents (${response.status})`);
+  return await response.json();
+}
+
+export async function getAIAgentsHistory(limit = 50) {
+  const baseUrl = getApiBaseUrl();
+  const response = await fetch(`${baseUrl}/api/settings/ai-agents/history?limit=${limit}`, {
+    method: "GET",
+    headers: { "Content-Type": "application/json" },
+  });
+  if (!response.ok) throw new Error(`Failed to load agent history (${response.status})`);
+  return await response.json();
+}
+
+export async function getAIAgentDetail(agentId) {
+  const baseUrl = getApiBaseUrl();
+  const response = await fetch(`${baseUrl}/api/settings/ai-agents/${agentId}`, {
+    method: "GET",
+    headers: { "Content-Type": "application/json" },
+  });
+  if (!response.ok) throw new Error(`Failed to load agent detail (${response.status})`);
+  return await response.json();
+}
+
+export async function testAIAgent(agentId, testPayload = null) {
+  const baseUrl = getApiBaseUrl();
+  let pld = null;
+  if (typeof testPayload === "object" && testPayload !== null) {
+    pld = testPayload.query || testPayload.test_payload || JSON.stringify(testPayload);
+  } else {
+    pld = testPayload;
+  }
+  const response = await fetch(`${baseUrl}/api/settings/ai-agents/${agentId}/test`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ test_payload: pld }),
+  });
+  if (!response.ok) {
+    let msg = `Agent diagnostic test failed (${response.status})`;
+    try {
+      const err = await response.json();
+      if (err.detail) msg = err.detail;
+    } catch {}
+    throw new Error(msg);
+  }
+  return await response.json();
+}

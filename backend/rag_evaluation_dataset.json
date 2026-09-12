@@ -1,0 +1,169 @@
+{
+    "dataset_name": "GSVAI Golden RAG Evaluation Dataset",
+    "version": "1.0",
+    "source_documents": [
+        {
+            "document_name": "Oracle_Fusion_SR_PO_Invoice_Process_Guide.pdf",
+            "document_id": 2
+        }
+    ],
+    "evaluation_cases": [
+        {
+            "id": "RAG-001",
+            "question": "How do I create a supplier invoice in Oracle Fusion Payables?",
+            "expected_route": "ENTERPRISE_KNOWLEDGE_RAG",
+            "expected_source_keywords": [
+                "Oracle",
+                "Fusion",
+                "Invoice"
+            ],
+            "required_concepts": [
+                "supplier",
+                "invoice",
+                "Payables",
+                "invoice number",
+                "amount",
+                "currency",
+                "tax",
+                "validate"
+            ],
+            "reference_answer": "A supplier invoice can be entered in Oracle Fusion Payables through the configured invoice-entry channel, such as manual entry, portal/self-service, electronic integration, or imaging/OCR. The invoice should include the business unit, supplier, invoice number, date, amount, currency, and applicable tax, and should reference the related PO where appropriate. The invoice is then validated and any matching, tax, supplier, or accounting holds are resolved."
+        },
+        {
+            "id": "RAG-002",
+            "question": "How do I create a Service Request and what is its purpose?",
+            "expected_route": "ENTERPRISE_KNOWLEDGE_RAG",
+            "expected_source_keywords": [
+                "Oracle",
+                "Fusion",
+                "SR"
+            ],
+            "required_concepts": [
+                "SR",
+                "requisition",
+                "request",
+                "approval",
+                "goods or services"
+            ],
+            "reference_answer": "In the process guide, an internal SR may represent a service-desk or organizational request that eventually creates a Fusion purchase requisition. The standard Fusion procurement purchasing object is normally a Purchase Requisition rather than an SR. The requester raises the request for goods or services, provides the required business information, and submits it for approval. BPM approval rules determine the approval chain based on configured attributes."
+        },
+        {
+            "id": "RAG-003",
+            "question": "How does a requisition or SR become a Purchase Order?",
+            "expected_route": "ENTERPRISE_KNOWLEDGE_RAG",
+            "expected_source_keywords": [
+                "Oracle",
+                "Fusion",
+                "Purchase"
+            ],
+            "required_concepts": [
+                "requisition",
+                "Purchase Order",
+                "buyer",
+                "supplier",
+                "approval"
+            ],
+            "reference_answer": "After an approved requisition is available to Procurement, the Procurement Agent or buyer processes the requisition lines and creates the appropriate Purchase Order. The buyer selects the supplier/site, reviews price, quantity, need-by date, ship-to and bill-to locations, payment terms and distributions, attaches supporting commercial documents if required, and submits the PO for approval. Once approved, the PO is communicated to the supplier through the configured method."
+        },
+        {
+            "id": "RAG-004",
+            "question": "What information is required when creating a purchase requisition?",
+            "expected_route": "ENTERPRISE_KNOWLEDGE_RAG",
+            "expected_source_keywords": [
+                "Oracle",
+                "Fusion",
+                "Requisition"
+            ],
+            "required_concepts": [
+                "item description",
+                "quantity",
+                "unit of measure",
+                "delivery date",
+                "Business Unit",
+                "deliver-to location",
+                "cost center",
+                "project"
+            ],
+            "reference_answer": "The requester typically enters the item or service description, quantity, unit of measure, requested delivery date, supplier if known, Business Unit, deliver-to location, charge or cost-center information, project information where applicable, and supporting attachments such as quotations or a statement of work. A business justification may also be required."
+        },
+        {
+            "id": "RAG-005",
+            "question": "Why is receipt or service confirmation important before invoice processing?",
+            "expected_route": "ENTERPRISE_KNOWLEDGE_RAG",
+            "expected_source_keywords": [
+                "Oracle",
+                "Fusion",
+                "Receipt"
+            ],
+            "required_concepts": [
+                "receipt",
+                "service confirmation",
+                "invoice",
+                "matching",
+                "goods",
+                "services"
+            ],
+            "reference_answer": "Receiving or service confirmation provides evidence that goods were received or a service was performed before a PO-based invoice is safely processed. For goods, a receipt is created against the PO. For services, the configured service receipt or confirmation records that the service was performed. This information supports invoice matching controls, including two-way and three-way matching."
+        },
+        {
+            "id": "RAG-006",
+            "question": "How does invoice matching work in the Oracle Fusion process?",
+            "expected_route": "ENTERPRISE_KNOWLEDGE_RAG",
+            "expected_source_keywords": [
+                "Oracle",
+                "Fusion",
+                "Invoice"
+            ],
+            "required_concepts": [
+                "2-way",
+                "3-way",
+                "4-way",
+                "price",
+                "quantity",
+                "receipt",
+                "inspection"
+            ],
+            "reference_answer": "Invoice matching compares invoice information with procurement and receiving information. Two-way matching validates price and quantity without requiring a receipt. Three-way matching adds receipt information and is a common control for goods where receipt confirmation is required. Four-way matching adds inspection or acceptance. If configured tolerances are satisfied, the invoice can proceed without the corresponding matching hold."
+        },
+        {
+            "id": "RAG-007",
+            "question": "How do I trace a Service Request through Purchase Order to invoice and payment?",
+            "expected_route": "ENTERPRISE_KNOWLEDGE_RAG",
+            "expected_source_keywords": [
+                "Oracle",
+                "Fusion",
+                "SR",
+                "Invoice"
+            ],
+            "required_concepts": [
+                "requisition",
+                "PO",
+                "PO line",
+                "receipt",
+                "invoice",
+                "accounting",
+                "payment"
+            ],
+            "reference_answer": "Start with the requisition number and line. From the requisition, identify the related PO and PO line. From the PO, identify the receipt or service confirmation. Locate the invoice in Payables using the supplier and invoice number or PO-related information. From the invoice, review accounting distributions and accounting status, then use invoice or payment information to trace payment status and payment reference."
+        },
+        {
+            "id": "RAG-008",
+            "question": "What are common invoice problems in this process and how should they be investigated?",
+            "expected_route": "ENTERPRISE_KNOWLEDGE_RAG",
+            "expected_source_keywords": [
+                "Oracle",
+                "Fusion",
+                "Invoice"
+            ],
+            "required_concepts": [
+                "quantity hold",
+                "price hold",
+                "missing PO",
+                "receipt",
+                "tax mismatch",
+                "accounting error"
+            ],
+            "reference_answer": "Common issues include quantity holds when the invoice quantity exceeds the PO or receipt quantity, price holds when invoice price differs from the PO beyond tolerance, missing PO or incorrect PO references, missing receipts or service confirmations, tax mismatches, and accounting errors. Investigation should begin by checking the relevant PO and receipt quantities, PO and invoice prices and tolerances, supplier and PO references, receiving or service confirmation, tax configuration and supplier/site details, and accounting distributions or SLA rules."
+        }
+    ]
+}
