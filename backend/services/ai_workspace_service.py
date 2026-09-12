@@ -21,11 +21,18 @@ from services.oci_llm_service import (
     generate_answer,
     generate_general_answer,
     MODEL_ID as LLM_MODEL_ID,
+    get_runtime_info as get_llm_runtime_info,
 )
 from services.execution_trace_service import ExecutionTracer
 from services.ai_runtime_config import (
     get_llm_config,
     get_embedding_config,
+)
+from services.ai_security_service import (
+    check_prompt_security,
+    check_sensitive_information_request,
+    check_document_instruction_security,
+    check_rag_context_security,
 )
 
 
@@ -43,16 +50,29 @@ def _embedding_trace_details(telemetry: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _llm_trace_details() -> Dict[str, Any]:
-    """Build dynamic LLM telemetry from active runtime configuration."""
+    """Build LLM telemetry from the provider that actually served the request."""
     cfg = get_llm_config()
+    runtime = get_llm_runtime_info()
+    current = runtime.get("current_runtime", {})
+
+    provider = current.get("provider") or cfg["provider"]
+    model = current.get("model") or cfg["model"]
+
+    endpoint = cfg.get("endpoint")
+    if provider == "Ollama":
+        endpoint = runtime.get("fallback", {}).get("endpoint")
 
     return {
-        "provider": cfg["provider"],
-        "model": cfg["model"],
-        "endpoint": cfg.get("endpoint"),
+        "provider": provider,
+        "model": model,
+        "endpoint": endpoint,
         "temperature": 0.2,
         "max_tokens": 400,
-        "serving_mode": "API",
+        "serving_mode": "LOCAL" if provider == "Ollama" else "API",
+        "fallback": bool(current.get("fallback", False)),
+        "fallback_reason": current.get("fallback_reason"),
+        "primary_provider": runtime.get("primary", {}).get("provider"),
+        "primary_model": runtime.get("primary", {}).get("model"),
     }
 
 
@@ -156,6 +176,79 @@ def process_workspace_document(file_path: str, filename: Optional[str] = None) -
     ocr_status = oci_result.get("ocr_status", "completed")
     print(f"OCR completed (Pages: {pages_count}, Status: {ocr_status})")
     print()
+
+    # -----------------------------------------------------
+    # Security Gate: Indirect Prompt Injection in Documents
+    # -----------------------------------------------------
+    # Treat OCR/extracted document text as untrusted data. The security
+    # check must happen before persistence, embedding generation, or
+    # vector indexing so malicious instructions never enter the KB.
+    document_text_parts = []
+
+    if isinstance(oci_result.get("pages_text"), list):
+        document_text_parts.extend(
+            str(page)
+            for page in oci_result.get("pages_text", [])
+            if page
+        )
+
+    for field_name in ("full_text", "extracted_text_preview"):
+        field_value = oci_result.get(field_name)
+        if field_value:
+            document_text_parts.append(str(field_value))
+
+    document_security_text = "\n\n".join(document_text_parts)
+
+    document_security = check_document_instruction_security(
+        document_security_text
+    )
+
+    if not document_security.get("allowed", False):
+        print()
+        print("=" * 60)
+        print("AI SECURITY: DOCUMENT INSTRUCTION BLOCKED")
+        print(f"Filename       : {filename}")
+        print(f"Risk Level     : {document_security.get('risk_level', 'HIGH')}")
+        print(f"Matched Rules  : {document_security.get('matched_rules', [])}")
+        print("Knowledge Index: SKIPPED")
+        print("=" * 60)
+
+        return {
+            "status": "blocked",
+            "analysis_id": None,
+            "document_id": None,
+            "filename": filename,
+            "document_type": oci_result.get("document_type", "PDF"),
+            "pages": pages_count,
+            "text_pages": oci_result.get("text_pages", 1),
+            "ocr_required_pages": oci_result.get("ocr_required_pages", 0),
+            "ocr_status": ocr_status,
+            "indexing_status": "BLOCKED",
+            "chunks": 0,
+            "confidence": oci_result.get("confidence"),
+            "extracted_text_preview": oci_result.get("extracted_text_preview", ""),
+            "full_text": oci_result.get("full_text", ""),
+            "entities": oci_result.get("entities", []),
+            "tables": oci_result.get("tables", []),
+            "security": {
+                "status": "BLOCKED",
+                "risk_level": document_security.get("risk_level", "HIGH"),
+                "control": "indirect_prompt_injection_protection",
+            },
+            "pipeline": {
+                "document_ingestion": "completed",
+                "ocr": ocr_status,
+                "security_validation": "BLOCKED",
+                "knowledge_indexing": "SKIPPED",
+                "embeddings": "SKIPPED",
+                "validation": "BLOCKED",
+            },
+            "message": (
+                "Document blocked by the AI security policy because "
+                "untrusted document instructions were detected. "
+                "The document was not persisted or indexed."
+            ),
+        }
 
     # Step 2: Persist Document Intelligence Record
     print("Persistence started (GSVAI_DOCUMENT_INTELLIGENCE)...")
@@ -482,6 +575,22 @@ Summary Response:
 -----------------
 """
         t_llm_start = time.perf_counter()
+        context_security_result = _check_rag_context_security(
+            context=combined_context,
+            tracer=tracer,
+            context_source="DATE_BASED_DOCUMENT_SUMMARY",
+        )
+        if context_security_result:
+            return context_security_result
+
+        context_security_result = _check_rag_context_security(
+            context=combined_context,
+            tracer=tracer,
+            context_source="SELECTED_DOCUMENT_SUMMARY",
+        )
+        if context_security_result:
+            return context_security_result
+
         answer = generate_general_answer(prompt)
         llm_duration_ms = (time.perf_counter() - t_llm_start) * 1000
 
@@ -720,6 +829,87 @@ Executive Summary:
 
 
 # =========================================================
+# AI Security: RAG Context Protection
+# =========================================================
+
+def _check_rag_context_security(
+    context: str,
+    tracer: Optional[ExecutionTracer] = None,
+    context_source: str = "RAG"
+) -> Optional[Dict[str, Any]]:
+    """Block untrusted/manipulated RAG context before LLM invocation."""
+    context_security = check_rag_context_security(context)
+
+    if context_security.get("allowed", False):
+        if tracer:
+            tracer.add_step(
+                name="RAG Context Security",
+                status="completed",
+                duration_ms=1,
+                explanation=(
+                    "Retrieved context passed deterministic security validation "
+                    "before LLM invocation."
+                ),
+                details={
+                    "control": "rag_context_manipulation_protection",
+                    "status": "ALLOWED",
+                    "context_source": context_source,
+                }
+            )
+        return None
+
+    print()
+    print("=" * 60)
+    print("AI SECURITY: RAG CONTEXT BLOCKED")
+    print(f"Context Source : {context_source}")
+    print(f"Risk Level     : {context_security.get('risk_level', 'HIGH')}")
+    print(f"Matched Rules  : {context_security.get('matched_rules', [])}")
+    print("LLM Execution  : SKIPPED")
+    print("=" * 60)
+
+    if tracer:
+        tracer.add_step(
+            name="RAG Context Security",
+            status="blocked",
+            duration_ms=1,
+            explanation=(
+                "Retrieved context was blocked by the deterministic AI security "
+                "layer before LLM invocation."
+            ),
+            details={
+                "control": "rag_context_manipulation_protection",
+                "status": "BLOCKED",
+                "context_source": context_source,
+                "risk_level": context_security.get("risk_level", "HIGH"),
+                "matched_rules": context_security.get("matched_rules", []),
+                "downstream_execution": "SKIPPED",
+            }
+        )
+        tracer.add_step(
+            name="Response Generated",
+            status="blocked",
+            duration_ms=1,
+            explanation="No AI response was generated from blocked RAG context.",
+            details={"status": "SECURITY_BLOCKED"}
+        )
+
+    return {
+        "answer": (
+            "I can’t generate an answer from this knowledge context because "
+            "the retrieved content failed the AI security policy."
+        ),
+        "source_type": "security_blocked",
+        "sources": [],
+        "security": {
+            "status": "BLOCKED",
+            "risk_level": context_security.get("risk_level", "HIGH"),
+            "control": "rag_context_manipulation_protection",
+        },
+        "trace": tracer.to_dict() if tracer else None,
+    }
+
+
+# =========================================================
 # AI Workspace Unified Chat Routing
 # =========================================================
 
@@ -745,6 +935,129 @@ def query_ai_workspace(
             "source_type": "none",
             "sources": [],
             "trace": None
+        }
+
+    # -----------------------------------------------------
+    # Security Gate: User Prompt Protection
+    # -----------------------------------------------------
+    # Run before routing, retrieval, or any LLM invocation so a
+    # malicious user prompt cannot reach the downstream AI pipeline.
+    prompt_security = check_prompt_security(q_clean)
+    if not prompt_security.get("allowed", False):
+        print()
+        print("=" * 60)
+        print("AI SECURITY: USER PROMPT BLOCKED")
+        print(f"Risk Level     : {prompt_security.get('risk_level', 'HIGH')}")
+        print(f"Matched Rules  : {prompt_security.get('matched_rules', [])}")
+        print("=" * 60)
+
+        security_tracer = ExecutionTracer(
+            query=q_clean,
+            scope=scope,
+            document_id=document_id
+        )
+        security_tracer.route = "SECURITY_BLOCKED"
+        security_tracer.route_label = "AI Security - Prompt Blocked"
+        security_tracer.rag_used = False
+        security_tracer.add_step(
+            name="AI Security Gate",
+            status="blocked",
+            duration_ms=1,
+            explanation=(
+                "User prompt was blocked by the deterministic AI security "
+                "layer before RAG, agent routing, or LLM execution."
+            ),
+            details={
+                "control": "prompt_injection_protection",
+                "allowed": False,
+                "risk_level": prompt_security.get("risk_level", "HIGH"),
+                "matched_rules": prompt_security.get("matched_rules", []),
+                "downstream_execution": "SKIPPED"
+            }
+        )
+        security_tracer.add_step(
+            name="Response Generated",
+            status="blocked",
+            duration_ms=1,
+            explanation="No AI response was generated for the blocked request.",
+            details={"status": "SECURITY_BLOCKED"}
+        )
+
+        return {
+            "answer": (
+                "I can’t process this request because it was blocked by the "
+                "AI security policy. Please rephrase your question without "
+                "instructions to bypass system controls or disclose protected information."
+            ),
+            "source_type": "security_blocked",
+            "sources": [],
+            "security": {
+                "status": "BLOCKED",
+                "risk_level": prompt_security.get("risk_level", "HIGH"),
+                "control": "prompt_injection_protection"
+            },
+            "trace": security_tracer.to_dict()
+        }
+
+    # -----------------------------------------------------
+    # Security Gate: Sensitive Information Protection
+    # -----------------------------------------------------
+    # Run immediately after prompt-injection protection and before
+    # routing, embeddings, RAG retrieval, or any LLM invocation.
+    sensitive_security = check_sensitive_information_request(q_clean)
+    if not sensitive_security.get("allowed", False):
+        print()
+        print("=" * 60)
+        print("AI SECURITY: SENSITIVE INFORMATION REQUEST BLOCKED")
+        print(f"Risk Level     : {sensitive_security.get('risk_level', 'HIGH')}")
+        print(f"Matched Rules  : {sensitive_security.get('matched_rules', [])}")
+        print("=" * 60)
+
+        security_tracer = ExecutionTracer(
+            query=q_clean,
+            scope=scope,
+            document_id=document_id
+        )
+        security_tracer.route = "SECURITY_BLOCKED"
+        security_tracer.route_label = "AI Security - Sensitive Information Blocked"
+        security_tracer.rag_used = False
+        security_tracer.add_step(
+            name="AI Security Gate",
+            status="blocked",
+            duration_ms=1,
+            explanation=(
+                "Sensitive-information request was blocked by the deterministic "
+                "AI security layer before routing, retrieval, or LLM execution."
+            ),
+            details={
+                "control": "sensitive_information_protection",
+                "allowed": False,
+                "risk_level": sensitive_security.get("risk_level", "HIGH"),
+                "matched_rules": sensitive_security.get("matched_rules", []),
+                "downstream_execution": "SKIPPED"
+            }
+        )
+        security_tracer.add_step(
+            name="Response Generated",
+            status="blocked",
+            duration_ms=1,
+            explanation="No AI response was generated for the blocked request.",
+            details={"status": "SECURITY_BLOCKED"}
+        )
+
+        return {
+            "answer": (
+                "I can’t process this request because it asks for protected or "
+                "sensitive application information."
+            ),
+            "source_type": "security_blocked",
+            "sources": [],
+            "security": {
+                "status": "BLOCKED",
+                "risk_level": sensitive_security.get("risk_level", "HIGH"),
+                "control": "sensitive_information_protection"
+            },
+            "trace": security_tracer.to_dict()
         }
 
     print()
@@ -933,6 +1246,14 @@ def query_ai_workspace(
             }
         )
 
+        context_security_result = _check_rag_context_security(
+            context=context,
+            tracer=tracer,
+            context_source="SELECTED_DOCUMENT_RAG",
+        )
+        if context_security_result:
+            return context_security_result
+
         t_llm_start = time.perf_counter()
         rag_answer = generate_answer(
             question=q_clean,
@@ -1090,6 +1411,14 @@ def query_ai_workspace(
                     "context_length_chars": len(context)
                 }
             )
+
+            context_security_result = _check_rag_context_security(
+                context=context,
+                tracer=tracer,
+                context_source="ENTERPRISE_KNOWLEDGE_RAG",
+            )
+            if context_security_result:
+                return context_security_result
 
             t_llm_start = time.perf_counter()
             rag_answer = generate_answer(
@@ -1267,5 +1596,3 @@ def query_ai_workspace(
         "sources": [],
         "trace": tracer.to_dict()
     }
-
-

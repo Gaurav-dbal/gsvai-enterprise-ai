@@ -52,6 +52,15 @@ jobs:
             test_ai_runtime_config.py \
             -v
 
+      - name: Run AI security controls
+        working-directory: backend
+        env:
+          GROQ_API_KEY: "ci-test-key"
+          GROQ_MODEL: "openai/gpt-oss-20b"
+        run: |
+          python test_security_controls_1_4_8.py
+
+
       - name: Run invoice API tests
         working-directory: backend
         env:
